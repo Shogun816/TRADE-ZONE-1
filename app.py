@@ -83,26 +83,34 @@ with st.sidebar:
     # API Provider selection
     api_provider = st.selectbox(
         "📡 API Provider",
-        ["Alpha Vantage (Stocks only)", "Polygon.io (All markets)", "Twelve Data (All markets)", "Demo Data"],
-        help="Select your data provider"
+        ["Yahoo Finance (FREE - No API Key)", "Alpha Vantage (Stocks only)", "Polygon.io (All markets)", "Twelve Data (All markets)", "Demo Data"],
+        help="Yahoo Finance works for all instruments without API key!"
     )
     
-    # API Key input
-    api_key = st.text_input(
-        "🔑 API Key", 
-        type="password", 
-        help=f"Enter your {api_provider.split('(')[0].strip()} API key",
-        key="api_key_input"
-    )
-    
-    if api_key:
-        st.success(f"✅ API Key entered ({len(api_key)} chars)")
+    # API Key input (not needed for Yahoo Finance)
+    if "Yahoo Finance" not in api_provider:
+        api_key = st.text_input(
+            "🔑 API Key", 
+            type="password", 
+            help=f"Enter your {api_provider.split('(')[0].strip()} API key",
+            key="api_key_input"
+        )
+        
+        if api_key:
+            st.success(f"✅ API Key entered ({len(api_key)} chars)")
+        else:
+            st.info("💡 Enter API key for live data")
     else:
-        st.info("💡 Using demo data - Enter API key for live data")
+        api_key = None
+        st.success("✅ Yahoo Finance - No API key needed!")
     
     # Show API signup links
     with st.expander("🔗 Get Free API Keys"):
         st.markdown("""
+        **Yahoo Finance** (FREE - No API needed!)
+        - Works for: Stocks, Commodities, Forex, Indices
+        - No signup required!
+        
         **Alpha Vantage** (Stocks only - 25 calls/day)
         - Get key: https://www.alphavantage.co/support/#api-key
         
@@ -134,7 +142,9 @@ def fetch_live_data(symbol, timeframe, api_key, api_provider):
     """
     Fetch live data from multiple API providers
     """
-    if not api_key or len(api_key) < 10 or "Demo Data" in api_provider:
+    if "Yahoo Finance" in api_provider:
+        return fetch_yahoo_finance(symbol, timeframe)
+    elif not api_key or len(api_key) < 10 or "Demo Data" in api_provider:
         # Generate dummy data for demo
         dates = pd.date_range(end=datetime.now(), periods=100, freq='5min')
         base_price = np.random.uniform(100, 200)
@@ -156,6 +166,46 @@ def fetch_live_data(symbol, timeframe, api_key, api_provider):
     elif "Twelve Data" in api_provider:
         return fetch_twelve_data(symbol, timeframe, api_key)
     else:
+        return None
+
+
+def fetch_yahoo_finance(symbol, timeframe):
+    """Fetch data from Yahoo Finance (FREE - No API key needed)"""
+    if not YFINANCE_AVAILABLE:
+        st.error("❌ yfinance not installed. Run: pip install yfinance")
+        return None
+    
+    try:
+        # Map timeframe to yfinance interval
+        interval_map = {
+            "5min": "5m",
+            "15min": "15m",
+            "30min": "30m",
+            "1hour": "1h"
+        }
+        interval = interval_map.get(timeframe, "15m")
+        
+        # Download data
+        ticker = yf.Ticker(symbol)
+        df = ticker.history(period="5d", interval=interval)
+        
+        if df.empty:
+            st.warning(f"⚠️ No data for {symbol}. Check symbol format.")
+            return None
+        
+        # Reset index and rename columns
+        df = df.reset_index()
+        df.columns = [col.lower() if col != 'Datetime' else 'timestamp' for col in df.columns]
+        
+        # Keep only needed columns
+        df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
+        df = df.tail(100)
+        
+        st.success(f"✅ Live data loaded from Yahoo Finance (FREE)!")
+        return df
+        
+    except Exception as e:
+        st.error(f"❌ Yahoo Finance Error: {str(e)}")
         return None
 
 
