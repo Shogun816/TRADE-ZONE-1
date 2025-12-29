@@ -1,4 +1,4 @@
 streamlit
 pandas
 plotly
-polygon
+polygon-api-client
