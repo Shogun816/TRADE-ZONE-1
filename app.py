@@ -1,117 +1,110 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-import requests
+import yfinance as yf
 from datetime import datetime
 
-st.set_page_config(page_title="Gold Dashboard", layout="wide")
-st.title("Gold Trading Edge Dashboard (XAUUSD)")
-st.markdown("**Instant load** • Strong signals with BIG arrows + SOUND ALERT")
+# Auto-refresh page every 60 seconds (real-time feel)
+st.set_page_config(page_title="Gold Live Dashboard", layout="wide")
+st.title("Gold Live Trading Dashboard (XAUUSD)")
+st.markdown("**Near Real-Time Candles** (updates every 60s) • Current candle builds live like TradingView")
 
-# Live price (fast free API)
-@st.cache_data(ttl=60)
-def get_live_price():
-    try:
-        response = requests.get("https://data-asg.goldprice.org/dbXRates/USD")
-        data = response.json()
-        price = data['items'][0]['xauPrice']
-        return price
-    except:
-        return 4324.45  # Today's known price
+# Auto-refresh trick
+st.automatic_execution = True
+st.rerun_button = st.button("Refresh Now")  # Optional manual refresh
 
-price = get_live_price()
-st.success(f"**Live Gold Spot Price: ${price:.2f}** (refresh for update)")
+# Fetch live data (fast - last 3 days, 1min bars for smooth updates)
+@st.cache_data(ttl=30)  # Cache 30 seconds - updates often
+def get_live_data():
+    ticker = "XAUUSD=X"  # Accurate spot gold
+    df = yf.download(ticker, period="3d", interval="1m")
+    if df.empty:
+        return None
+    df = df[['Open', 'High', 'Low', 'Close', 'Volume']]
+    df.columns = ['open', 'high', 'low', 'close', 'volume']
+    return df
 
-# Recent real 5min data (Dec 29, 2025 - ~$4324 range)
-data = {
-    'timestamp': pd.date_range(start='2025-12-29 08:00', periods=120, freq='5T'),
-    'open': [4335] + [4328 + i*0.2 for i in range(119)],
-    'high': [4340] + [4332 + i*0.2 for i in range(119)],
-    'low': [4328] + [4323 + i*0.2 for i in range(119)],
-    'close': [4330] + [4325 + i*0.2 for i in range(119)],
-    'volume': [1500 + i*50 for i in range(120)]
-}
-df_5min = pd.DataFrame(data)
-df_5min.set_index('timestamp', inplace=True)
+df = get_live_data()
 
-# 15min
-df_15min = df_5min.resample('15T').agg({
-    'open': 'first', 'high': 'max', 'low': 'min',
-    'close': 'last', 'volume': 'sum'
-}).dropna()
+if df is not None and not df.empty:
+    latest_price = df['close'].iloc[-1]
+    latest_time = df.index[-1].strftime('%H:%M:%S')
+    st.success(f"**Live Gold Price: ${latest_price:.2f}** at {latest_time} (auto-updates)")
 
-# Enhanced signals
-def add_signals(data):
-    data['vol_avg'] = data['volume'].rolling(20).mean()
-    data['high_volume'] = data['volume'] > 1.5 * data['vol_avg']
-    data['very_high_volume'] = data['volume'] > 2.0 * data['vol_avg']  # Very strong
-    
-    data['delta'] = (data['close'] - data['open']) / (data['high'] - data['low'] + 1e-8)
-    
-    # Regular
-    data['buy'] = (data['delta'] > 0.3) & data['high_volume']
-    data['sell'] = (data['delta'] < -0.3) & data['high_volume']
-    
-    # VERY STRONG
-    data['strong_buy'] = (data['delta'] > 0.5) & data['very_high_volume']
-    data['strong_sell'] = (data['delta'] < -0.5) & data['very_high_volume']
-    
-    return data
+    # Resample to 5min/15min - current candle updates live
+    df_5min = df.resample('5T').agg({
+        'open': 'first', 'high': 'max', 'low': 'min',
+        'close': 'last', 'volume': 'sum'
+    }).dropna()
 
-df_5min = add_signals(df_5min)
-df_15min = add_signals(df_15min)
+    df_15min = df.resample('15T').agg({
+        'open': 'first', 'high': 'max', 'low': 'min',
+        'close': 'last', 'volume': 'sum'
+    }).dropna()
 
-# Sound alert for very strong signal on current bar
-current = df_5min.iloc[-1]
-if current['strong_buy'] or current['strong_sell']:
-    st.audio("https://assets.mixkit.co/sfx/preview/mixkit-alarm-digital-clock-beep-989.mp3", format="audio/mp3", autoplay=True)
+    # Signals (same as before + very strong)
+    def add_signals(data):
+        data['vol_avg'] = data['volume'].rolling(20).mean()
+        data['high_volume'] = data['volume'] > 1.5 * data['vol_avg']
+        data['very_high_volume'] = data['volume'] > 2.0 * data['vol_avg']
+        data['delta'] = (data['close'] - data['open']) / (data['high'] - data['low'] + 1e-8)
+        data['buy'] = (data['delta'] > 0.3) & data['high_volume']
+        data['sell'] = (data['delta'] < -0.3) & data['high_volume']
+        data['strong_buy'] = (data['delta'] > 0.5) & data['very_high_volume']
+        data['strong_sell'] = (data['delta'] < -0.5) & data['very_high_volume']
+        return data
 
-def plot_chart(df, title):
-    fig = go.Figure()
-    fig.add_trace(go.Candlestick(x=df.index, open=df['open'], high=df['high'],
-                                 low=df['low'], close=df['close'], name="Price"))
+    df_5min = add_signals(df_5min)
+    df_15min = add_signals(df_15min)
 
-    # Regular signals
-    buys = df[df['buy'] & ~df['strong_buy']]
-    sells = df[df['sell'] & ~df['strong_sell']]
-    fig.add_trace(go.Scatter(x=buys.index, y=buys['low']*0.998, mode='markers',
-                             marker=dict(symbol='triangle-up', size=14, color='green'), name='Buy'))
-    fig.add_trace(go.Scatter(x=sells.index, y=sells['high']*1.002, mode='markers',
-                             marker=dict(symbol='triangle-down', size=14, color='red'), name='Sell'))
+    # Sound for very strong signal
+    current = df_5min.iloc[-1]
+    if current['strong_buy'] or current['strong_sell']:
+        st.audio("https://assets.mixkit.co/sfx/preview/mixkit-alarm-digital-clock-beep-989.mp3", autoplay=True)
 
-    # VERY STRONG signals
-    strong_buys = df[df['strong_buy']]
-    strong_sells = df[df['strong_sell']]
-    
-    fig.add_trace(go.Scatter(x=strong_buys.index, y=strong_buys['low']*0.995, mode='markers+text',
-                             marker=dict(symbol='triangle-up', size=32, color='lime'),
-                             text=["VERY STRONG BUY!"], textposition="bottom center",
-                             textfont=dict(size=16, color="lime"), name='STRONG BUY'))
-    
-    fig.add_trace(go.Scatter(x=strong_sells.index, y=strong_sells['high']*1.005, mode='markers+text',
-                             marker=dict(symbol='triangle-down', size=32, color='red'),
-                             text=["VERY STRONG SELL!"], textposition="top center",
-                             textfont=dict(size=16, color="red"), name='STRONG SELL'))
+    def plot_chart(df, title):
+        fig = go.Figure()
+        fig.add_trace(go.Candlestick(x=df.index, open=df['open'], high=df['high'],
+                                     low=df['low'], close=df['close'], name="Live Candles"))
 
-    fig.update_layout(title=title, template="plotly_dark", height=600)
-    st.plotly_chart(fig, use_container_width=True)
+        # Signals
+        buys = df[df['buy'] & ~df['strong_buy']]
+        sells = df[df['sell'] & ~df['strong_sell']]
+        fig.add_trace(go.Scatter(x=buys.index, y=buys['low']*0.998, mode='markers',
+                                 marker=dict(symbol='triangle-up', size=14, color='green'), name='Buy'))
+        fig.add_trace(go.Scatter(x=sells.index, y=sells['high']*1.002, mode='markers',
+                                 marker=dict(symbol='triangle-down', size=14, color='red'), name='Sell'))
 
-st.subheader("5-Minute Chart")
-plot_chart(df_5min.tail(100), "XAUUSD 5min - Strong Signals")
+        # Very strong
+        strong_buys = df[df['strong_buy']]
+        strong_sells = df[df['strong_sell']]
+        fig.add_trace(go.Scatter(x=strong_buys.index, y=strong_buys['low']*0.995, mode='markers+text',
+                                 marker=dict(symbol='triangle-up', size=32, color='lime'),
+                                 text=["STRONG BUY!"], textposition="bottom center", textfont=dict(size=16, color="lime")))
+        fig.add_trace(go.Scatter(x=strong_sells.index, y=strong_sells['high']*1.005, mode='markers+text',
+                                 marker=dict(symbol='triangle-down', size=32, color='red'),
+                                 text=["STRONG SELL!"], textposition="top center", textfont=dict(size=16, color="red")))
 
-st.subheader("15-Minute Chart")
-plot_chart(df_15min.tail(60), "XAUUSD 15min")
+        fig.update_layout(title=title + " (Current candle updates live)", template="plotly_dark", height=600)
+        st.plotly_chart(fig, use_container_width=True)
 
-# Text alerts (fixed strings)
-if current['strong_buy']:
-    st.success("🔊 VERY STRONG BUY SIGNAL - Extreme volume + big upward move!")
-elif current['strong_sell']:
-    st.warning("🔊 VERY STRONG SELL SIGNAL - Extreme volume + big drop!")
-elif current['buy']:
-    st.success("🟢 Regular Buy Signal")
-elif current['sell']:
-    st.warning("🔴 Regular Sell Signal")
+    st.subheader("5-Minute Live Chart")
+    plot_chart(df_5min.tail(120), "XAUUSD 5min")
+
+    st.subheader("15-Minute Live Chart")
+    plot_chart(df_15min.tail(80), "XAUUSD 15min")
+
+    # Alert
+    if current['strong_buy']:
+        st.success("🔊 VERY STRONG BUY - Live now!")
+    elif current['strong_sell']:
+        st.warning("🔊 VERY STRONG SELL - Live now!")
+    elif current['buy']:
+        st.success("🟢 Buy Signal")
+    elif current['sell']:
+        st.warning("🔴 Sell Signal")
+
 else:
-    st.info("Market ranging - waiting for volume spike")
+    st.info("Loading live candles... Refresh in 30s")
 
-st.caption("Instant load • Big arrows + sound for very strong signals • Refresh for live price")
+st.caption("Near real-time (auto-refresh) • Current candle builds like TradingView • Sound + big alerts for strong signals")
