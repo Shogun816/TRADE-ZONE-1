@@ -1,122 +1,126 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-from polygon import RESTClient
-from datetime import datetime, timedelta
-import numpy as np
+from polygon.rest import RESTClient  # This is the correct import
+from datetime import datetime
 
+st.set_page_config(page_title="Gold Trading Dashboard", layout="wide")
 st.title("Gold Trading Edge Dashboard (XAUUSD)")
-st.markdown("""
-### Volume & Delta Proxy Strategy (Footprint Approximation)
-- Fetches live 1-min data from Polygon
-- Resamples to 5min & 15min
-- Signals: High volume + directional delta → Buy/Sell arrows
-- Institutional news summary below
-""")
+st.markdown("Live 5min & 15min charts with volume-based buy/sell signals")
 
-# Fetch data function
-@st.cache_data(ttl=300)  # Cache for 5 minutes
-def fetch_data(days=3):
-    client = RESTClient()  # API key auto-configured or from secrets
-    ticker = "C:XAUUSD"
-    end = int(datetime.now().timestamp() * 1_000_000)
-    start = int((datetime.now() - timedelta(days=days)).timestamp() * 1_000_000)
-    aggs = list(client.get_aggs(ticker, 1, "minute", start, end, limit=50000))
-    if not aggs:
-        st.error("No data fetched. Check Polygon API key.")
-        return None
-    df = pd.DataFrame(aggs)
-    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-    df.set_index('timestamp', inplace=True)
-    df = df[['open', 'high', 'low', 'close', 'volume', 'transactions']]
-    return df
+# Check for API key
+if "POLYGON_API_KEY" not in st.secrets:
+    st.error("⚠️ Please add your Polygon API key in Settings > Secrets as: POLYGON_API_KEY = \"your_key_here\"")
+    st.info("Get a free key at: https://polygon.io")
+    st.stop()
 
-df_min = fetch_data()
+# Create client with your secret key
+client = RESTClient(st.secrets["POLYGON_API_KEY"])
 
-if df_min is not None and not df_min.empty:
-    latest_price = df_min['close'].iloc[-1]
-    st.success(f"Latest Gold Price: ${latest_price:.2f} (as of {df_min.index[-1]})")
-
-    # Resample
-    df_5 = df_min.resample('5min').agg({
-        'open': 'first',
-        'high': 'max',
-        'low': 'min',
-        'close': 'last',
-        'transactions': 'sum'
-    }).dropna()
-
-    df_15 = df_min.resample('15min').agg({
-        'open': 'first',
-        'high': 'max',
-        'low': 'min',
-        'close': 'last',
-        'transactions': 'sum'
-    }).dropna()
-
-    # Compute signals
-    def add_signals(df, timeframe_name):
-        df['delta_proxy'] = (df['close'] - df['open']) / (df['high'] - df['low'] + 1e-6)  # Normalized delta
-        df['vol_avg'] = df['transactions'].rolling(20).mean()
-        df['high_vol'] = df['transactions'] > 1.5 * df['vol_avg']
+@st.cache_data(ttl=180)  # Refresh every 3 minutes
+def get_gold_data():
+    try:
+        # Fetch recent 1-minute bars for gold
+        aggs = client.get_aggs("C:XAUUSD", 1, "minute", limit=50000)
+        if not aggs:
+            st.warning("No data available right now (markets may be slow)")
+            return None
         
-        df['buy_signal'] = (df['delta_proxy'] > 0.3) & df['high_vol'] & (df['close'] > df['high'].shift(1))
-        df['sell_signal'] = (df['delta_proxy'] < -0.3) & df['high_vol'] & (df['close'] < df['low'].shift(1))
-        
+        df = pd.DataFrame(aggs)
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+        df.set_index('timestamp', inplace=True)
+        df = df[['open', 'high', 'low', 'close', 'transactions']]  # Use transactions as volume proxy
         return df
+    except Exception as e:
+        st.error(f"Error loading data: {e}")
+        return None
 
-    df_5 = add_signals(df_5, "5min")
-    df_15 = add_signals(df_15, "15min")
+df = get_gold_data()
+
+if df is not None and not df.empty:
+    latest_price = df['close'].iloc[-1]
+    st.success(f"Current Gold Price: ${latest_price:.2f}")
+
+    # Resample to 5min and 15min
+    df_5min = df.resample('5T').agg({
+        'open': 'first',
+        'high': 'max',
+        'low': 'min',
+        'close': 'last',
+        'transactions': 'sum'
+    }).dropna()
+
+    df_15min = df.resample('15T').agg({
+        'open': 'first',
+        'high': 'max',
+        'low': 'min',
+        'close': 'last',
+        'transactions': 'sum'
+    }).dropna()
+
+    # Add trading signals
+    def add_signals(data):
+        data['vol_avg'] = data['transactions'].rolling(20).mean()
+        data['high_volume'] = data['transactions'] > 1.5 * data['vol_avg']
+        data['delta'] = (data['close'] - data['open']) / (data['high'] - data['low'] + 1e-8)
+        data['buy'] = (data['delta'] > 0.3) & data['high_volume']
+        data['sell'] = (data['delta'] < -0.3) & data['high_volume']
+        return data
+
+    df_5min = add_signals(df_5min)
+    df_15min = add_signals(df_15min)
 
     # Plot function
     def plot_chart(df, title):
         fig = go.Figure()
-        fig.add_trace(go.Candlestick(x=df.index,
-                                     open=df['open'], high=df['high'],
-                                     low=df['low'], close=df['close'],
-                                     name="Candles"))
-        
-        # Buy arrows
-        buy = df[df['buy_signal']]
-        fig.add_trace(go.Scatter(x=buy.index, y=buy['low'] * 0.99,
-                                 mode='markers', marker_symbol='triangle-up',
-                                 marker_color='green', marker_size=15, name='Buy Signal'))
-        
-        # Sell arrows
-        sell = df[df['sell_signal']]
-        fig.add_trace(go.Scatter(x=sell.index, y=sell['high'] * 1.01,
-                                 mode='markers', marker_symbol='triangle-down',
-                                 marker_color='red', marker_size=15, name='Sell Signal'))
-        
-        fig.update_layout(title=title, xaxis_title="Time", yaxis_title="Price USD",
-                          template="plotly_dark")
+        fig.add_trace(go.Candlestick(
+            x=df.index,
+            open=df['open'],
+            high=df['high'],
+            low=df['low'],
+            close=df['close'],
+            name="Price"
+        ))
+
+        # Buy signals (green triangles)
+        buys = df[df['buy']]
+        fig.add_trace(go.Scatter(
+            x=buys.index,
+            y=buys['low'] * 0.998,
+            mode='markers',
+            marker=dict(symbol='triangle-up', size=15, color='lime'),
+            name='Buy Signal'
+        ))
+
+        # Sell signals (red triangles)
+        sells = df[df['sell']]
+        fig.add_trace(go.Scatter(
+            x=sells.index,
+            y=sells['high'] * 1.002,
+            mode='markers',
+            marker=dict(symbol='triangle-down', size=15, color='red'),
+            name='Sell Signal'
+        ))
+
+        fig.update_layout(title=title, xaxis_title="Time", yaxis_title="Price (USD)", template="plotly_dark", height=600)
         st.plotly_chart(fig, use_container_width=True)
 
-    st.subheader("5min Chart & Signals")
-    plot_chart(df_5[-100:], "XAUUSD 5min - Volume Delta Signals")  # Last ~8 hours
+    st.subheader("5-Minute Chart")
+    plot_chart(df_5min.tail(100), "XAUUSD 5min - Volume Signals")
 
-    st.subheader("15min Chart & Signals")
-    plot_chart(df_15[-100:], "XAUUSD 15min - Volume Delta Signals")
+    st.subheader("15-Minute Chart")
+    plot_chart(df_15min.tail(60), "XAUUSD 15min - Volume Signals")
 
-    # Current suggestions
-    st.subheader("Current Quick Signals")
-    last_5 = df_5.iloc[-1]
-    if last_5['buy_signal']:
-        st.success("🟢 Strong Long Signal on 5min - Consider entry above recent high")
-    elif last_5['sell_signal']:
-        st.warning("🔴 Strong Short Signal on 5min - Consider entry below recent low")
+    # Latest signal alert
+    last_5 = df_5min.iloc[-1]
+    if last_5['buy']:
+        st.success("🟢 Strong BUY Signal on 5min Chart!")
+    elif last_5['sell']:
+        st.warning("🔴 Strong SELL Signal on 5min Chart!")
     else:
-        st.info("No strong signal - Wait for volume spike + delta confirmation")
+        st.info("No strong signal right now — waiting for volume + momentum")
 
 else:
-    st.warning("Fetching data... Refresh page in a moment.")
+    st.info("Loading live data... Refresh in 30 seconds.")
 
-st.subheader("Institutional Gold Activity Summary (Late 2025)")
-st.markdown("""
-- Central banks added ~53t in October alone, with YTD purchases tracking toward 800-1,000t despite high prices.
-- Key buyers: Poland (leading YTD), China (consistent 25-30t/month), India, Kazakhstan.
-- Hedge funds & ETFs: Record inflows ($45B+ into gold ETFs), supporting prices above $4,500.
-- Overall bullish structural demand amid de-dollarization and geopolitical risks.
-""")
-
-st.caption("Data via Polygon (free tier limits apply). Refresh app for updates. Not financial advice - trade at your own risk!")
+st.caption("Not financial advice • Data via Polygon.io • Gold spot price (XAUUSD)")
