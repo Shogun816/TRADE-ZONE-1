@@ -69,13 +69,43 @@ with st.sidebar:
     # Timeframe selection
     timeframe = st.selectbox("⏱️ Timeframe", ["5min", "15min", "30min", "1hour"], index=1)
     
+    st.markdown("---")
+    st.markdown("### 🔑 API Configuration")
+    
+    # API Provider selection
+    api_provider = st.selectbox(
+        "📡 API Provider",
+        ["Alpha Vantage (Stocks only)", "Polygon.io (All markets)", "Twelve Data (All markets)", "Demo Data"],
+        help="Select your data provider"
+    )
+    
     # API Key input
-    api_key = st.text_input("🔑 API Key", type="password", help="Enter your Alpha Vantage API key", key="api_key_input")
+    api_key = st.text_input(
+        "🔑 API Key", 
+        type="password", 
+        help=f"Enter your {api_provider.split('(')[0].strip()} API key",
+        key="api_key_input"
+    )
     
     if api_key:
         st.success(f"✅ API Key entered ({len(api_key)} chars)")
     else:
         st.info("💡 Using demo data - Enter API key for live data")
+    
+    # Show API signup links
+    with st.expander("🔗 Get Free API Keys"):
+        st.markdown("""
+        **Alpha Vantage** (Stocks only - 25 calls/day)
+        - Get key: https://www.alphavantage.co/support/#api-key
+        
+        **Polygon.io** (All markets - 5 calls/min free)
+        - Get key: https://polygon.io/dashboard/signup
+        - Best for: Stocks, Forex, Crypto, Commodities
+        
+        **Twelve Data** (All markets - 800 calls/day free)
+        - Get key: https://twelvedata.com/pricing
+        - Best for: Commodities, Forex, Stocks
+        """)
     
     st.markdown("---")
     
@@ -92,11 +122,11 @@ with st.sidebar:
     ema_slow = st.slider("Slow EMA", 20, 200, 21)
 
 
-def fetch_live_data(symbol, timeframe, api_key):
+def fetch_live_data(symbol, timeframe, api_key, api_provider):
     """
-    Fetch live data from Alpha Vantage API
+    Fetch live data from multiple API providers
     """
-    if not api_key or len(api_key) < 10:
+    if not api_key or len(api_key) < 10 or "Demo Data" in api_provider:
         # Generate dummy data for demo
         dates = pd.date_range(end=datetime.now(), periods=100, freq='5min')
         base_price = np.random.uniform(100, 200)
@@ -110,26 +140,29 @@ def fetch_live_data(symbol, timeframe, api_key):
         })
         return df
     
+    # Route to appropriate API based on provider
+    if "Alpha Vantage" in api_provider:
+        return fetch_alpha_vantage(symbol, timeframe, api_key)
+    elif "Polygon" in api_provider:
+        return fetch_polygon(symbol, timeframe, api_key)
+    elif "Twelve Data" in api_provider:
+        return fetch_twelve_data(symbol, timeframe, api_key)
+    else:
+        return None
+
+
+def fetch_alpha_vantage(symbol, timeframe, api_key):
+    """Fetch data from Alpha Vantage"""
     try:
-        # Map timeframe to Alpha Vantage format
-        interval_map = {
-            "5min": "5min",
-            "15min": "15min",
-            "30min": "30min",
-            "1hour": "60min"
-        }
+        interval_map = {"5min": "5min", "15min": "15min", "30min": "30min", "1hour": "60min"}
         interval = interval_map.get(timeframe, "15min")
         
-        # Clean symbol for API call
         clean_symbol = symbol.replace("=X", "").replace("=F", "")
-        
-        # Alpha Vantage API call
         url = f"https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol={clean_symbol}&interval={interval}&apikey={api_key}&outputsize=full"
         
         response = requests.get(url, timeout=10)
         data = response.json()
         
-        # Check for API errors
         if "Error Message" in data:
             st.error(f"API Error: {data['Error Message']}")
             return None
@@ -137,63 +170,136 @@ def fetch_live_data(symbol, timeframe, api_key):
         if "Note" in data:
             st.warning(f"API Limit: {data['Note']}")
             return None
-            
-        # Parse the time series data
-        time_series_key = f"Time Series ({interval})"
         
+        time_series_key = f"Time Series ({interval})"
         if time_series_key not in data:
-            st.warning("⚠️ API returned no data. Using demo data. Check your API key or try a different symbol.")
-            # Return demo data as fallback
-            dates = pd.date_range(end=datetime.now(), periods=100, freq='5min')
-            base_price = np.random.uniform(100, 200)
-            df = pd.DataFrame({
-                'timestamp': dates,
-                'open': base_price + np.random.uniform(-5, 5, 100),
-                'high': base_price + np.random.uniform(0, 8, 100),
-                'low': base_price + np.random.uniform(-8, 0, 100),
-                'close': base_price + np.random.uniform(-5, 5, 100),
-                'volume': np.random.randint(1000000, 10000000, 100)
-            })
-            return df
+            st.warning("⚠️ No data from Alpha Vantage. Try a US stock symbol (AAPL, MSFT) or use Polygon/Twelve Data for commodities.")
+            return None
         
         time_series = data[time_series_key]
-        
-        # Convert to DataFrame
         df = pd.DataFrame.from_dict(time_series, orient='index')
         df.index = pd.to_datetime(df.index)
         df = df.sort_index()
-        
-        # Rename columns
         df.columns = ['open', 'high', 'low', 'close', 'volume']
         
-        # Convert to numeric
         for col in df.columns:
             df[col] = pd.to_numeric(df[col])
         
-        # Reset index to have timestamp as column
         df = df.reset_index()
         df.columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
-        
-        # Take last 100 data points
         df = df.tail(100)
         
-        st.success(f"✅ Live data loaded for {symbol}!")
+        st.success(f"✅ Live data loaded from Alpha Vantage!")
         return df
         
     except Exception as e:
-        st.error(f"Error fetching data: {str(e)}")
-        # Return demo data as fallback
-        dates = pd.date_range(end=datetime.now(), periods=100, freq='5min')
-        base_price = np.random.uniform(100, 200)
-        df = pd.DataFrame({
-            'timestamp': dates,
-            'open': base_price + np.random.uniform(-5, 5, 100),
-            'high': base_price + np.random.uniform(0, 8, 100),
-            'low': base_price + np.random.uniform(-8, 0, 100),
-            'close': base_price + np.random.uniform(-5, 5, 100),
-            'volume': np.random.randint(1000000, 10000000, 100)
-        })
+        st.error(f"Alpha Vantage Error: {str(e)}")
+        return None
+
+
+def fetch_polygon(symbol, timeframe, api_key):
+    """Fetch data from Polygon.io"""
+    try:
+        # Map symbols for Polygon format
+        symbol_map = {
+            "GC=F": "C:GCUSD",  # Gold
+            "SI=F": "C:SIUSD",  # Silver
+            "CL=F": "C:CLUSD",  # Crude Oil
+            "NG=F": "C:NGUSD",  # Natural Gas
+            "EURUSD=X": "C:EURUSD",
+            "GBPUSD=X": "C:GBPUSD",
+        }
+        
+        polygon_symbol = symbol_map.get(symbol, symbol)
+        
+        # Map timeframe
+        multiplier_map = {"5min": 5, "15min": 15, "30min": 30, "1hour": 60}
+        multiplier = multiplier_map.get(timeframe, 15)
+        
+        # Get date range
+        to_date = datetime.now()
+        from_date = to_date - timedelta(days=5)
+        
+        url = f"https://api.polygon.io/v2/aggs/ticker/{polygon_symbol}/range/{multiplier}/minute/{from_date.strftime('%Y-%m-%d')}/{to_date.strftime('%Y-%m-%d')}?adjusted=true&sort=asc&apiKey={api_key}"
+        
+        response = requests.get(url, timeout=10)
+        data = response.json()
+        
+        if data.get('status') != 'OK':
+            st.error(f"Polygon Error: {data.get('error', 'Unknown error')}")
+            return None
+        
+        if 'results' not in data or not data['results']:
+            st.warning("⚠️ No data from Polygon. Check symbol format or API limits.")
+            return None
+        
+        results = data['results']
+        df = pd.DataFrame(results)
+        
+        # Rename columns to match our format
+        df['timestamp'] = pd.to_datetime(df['t'], unit='ms')
+        df = df.rename(columns={'o': 'open', 'h': 'high', 'l': 'low', 'c': 'close', 'v': 'volume'})
+        df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
+        df = df.tail(100)
+        
+        st.success(f"✅ Live data loaded from Polygon.io!")
         return df
+        
+    except Exception as e:
+        st.error(f"Polygon Error: {str(e)}")
+        return None
+
+
+def fetch_twelve_data(symbol, timeframe, api_key):
+    """Fetch data from Twelve Data"""
+    try:
+        # Map symbols for Twelve Data
+        symbol_map = {
+            "GC=F": "XAU/USD",  # Gold
+            "SI=F": "XAG/USD",  # Silver
+            "CL=F": "WTI/USD",  # Crude Oil
+            "EURUSD=X": "EUR/USD",
+            "GBPUSD=X": "GBP/USD",
+        }
+        
+        twelve_symbol = symbol_map.get(symbol, symbol)
+        
+        # Map timeframe
+        interval_map = {"5min": "5min", "15min": "15min", "30min": "30min", "1hour": "1h"}
+        interval = interval_map.get(timeframe, "15min")
+        
+        url = f"https://api.twelvedata.com/time_series?symbol={twelve_symbol}&interval={interval}&outputsize=100&apikey={api_key}"
+        
+        response = requests.get(url, timeout=10)
+        data = response.json()
+        
+        if data.get('status') == 'error':
+            st.error(f"Twelve Data Error: {data.get('message', 'Unknown error')}")
+            return None
+        
+        if 'values' not in data:
+            st.warning("⚠️ No data from Twelve Data. Check symbol or API limits.")
+            return None
+        
+        values = data['values']
+        df = pd.DataFrame(values)
+        
+        df['timestamp'] = pd.to_datetime(df['datetime'])
+        df = df.rename(columns={'open': 'open', 'high': 'high', 'low': 'low', 'close': 'close', 'volume': 'volume'})
+        
+        for col in ['open', 'high', 'low', 'close', 'volume']:
+            df[col] = pd.to_numeric(df[col])
+        
+        df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
+        df = df.sort_values('timestamp')
+        df = df.tail(100)
+        
+        st.success(f"✅ Live data loaded from Twelve Data!")
+        return df
+        
+    except Exception as e:
+        st.error(f"Twelve Data Error: {str(e)}")
+        return None
 
 
 def calculate_indicators(df):
@@ -353,7 +459,7 @@ with col3:
     st.markdown(f"**Status:** {status}")
 
 # Fetch and process data
-df = fetch_live_data(symbol, timeframe, api_key)
+df = fetch_live_data(symbol, timeframe, api_key, api_provider)
 
 if df is not None and len(df) > 0:
     df = calculate_indicators(df)
