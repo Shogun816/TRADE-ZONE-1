@@ -1,4 +1,4 @@
 streamlit
 pandas
 plotly
-requests  # Add this if not there (for API call)
+requests
