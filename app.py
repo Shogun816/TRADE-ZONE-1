@@ -7,6 +7,14 @@ from datetime import datetime, timedelta
 import time
 import numpy as np
 
+# Try to import yfinance (install if needed: pip install yfinance)
+try:
+    import yfinance as yf
+    YFINANCE_AVAILABLE = True
+except ImportError:
+    YFINANCE_AVAILABLE = False
+    st.warning("⚠️ yfinance not installed. Run: pip install yfinance")
+
 # Page config
 st.set_page_config(page_title="Trading Signals Pro", layout="wide", initial_sidebar_state="expanded")
 
@@ -75,26 +83,34 @@ with st.sidebar:
     # API Provider selection
     api_provider = st.selectbox(
         "📡 API Provider",
-        ["Alpha Vantage (Stocks only)", "Polygon.io (All markets)", "Twelve Data (All markets)", "Demo Data"],
-        help="Select your data provider"
+        ["Yahoo Finance (FREE - No API Key)", "Alpha Vantage (Stocks only)", "Polygon.io (All markets)", "Twelve Data (All markets)", "Demo Data"],
+        help="Yahoo Finance works for all instruments without API key!"
     )
     
-    # API Key input
-    api_key = st.text_input(
-        "🔑 API Key", 
-        type="password", 
-        help=f"Enter your {api_provider.split('(')[0].strip()} API key",
-        key="api_key_input"
-    )
-    
-    if api_key:
-        st.success(f"✅ API Key entered ({len(api_key)} chars)")
+    # API Key input (not needed for Yahoo Finance)
+    if "Yahoo Finance" not in api_provider:
+        api_key = st.text_input(
+            "🔑 API Key", 
+            type="password", 
+            help=f"Enter your {api_provider.split('(')[0].strip()} API key",
+            key="api_key_input"
+        )
+        
+        if api_key:
+            st.success(f"✅ API Key entered ({len(api_key)} chars)")
+        else:
+            st.info("💡 Enter API key for live data")
     else:
-        st.info("💡 Using demo data - Enter API key for live data")
+        api_key = None
+        st.success("✅ Yahoo Finance - No API key needed!")
     
     # Show API signup links
     with st.expander("🔗 Get Free API Keys"):
         st.markdown("""
+        **Yahoo Finance** (FREE - No API needed!)
+        - Works for: Stocks, Commodities, Forex, Indices
+        - No signup required!
+        
         **Alpha Vantage** (Stocks only - 25 calls/day)
         - Get key: https://www.alphavantage.co/support/#api-key
         
@@ -126,7 +142,9 @@ def fetch_live_data(symbol, timeframe, api_key, api_provider):
     """
     Fetch live data from multiple API providers
     """
-    if not api_key or len(api_key) < 10 or "Demo Data" in api_provider:
+    if "Yahoo Finance" in api_provider:
+        return fetch_yahoo_finance(symbol, timeframe)
+    elif not api_key or len(api_key) < 10 or "Demo Data" in api_provider:
         # Generate dummy data for demo
         dates = pd.date_range(end=datetime.now(), periods=100, freq='5min')
         base_price = np.random.uniform(100, 200)
@@ -148,6 +166,46 @@ def fetch_live_data(symbol, timeframe, api_key, api_provider):
     elif "Twelve Data" in api_provider:
         return fetch_twelve_data(symbol, timeframe, api_key)
     else:
+        return None
+
+
+def fetch_yahoo_finance(symbol, timeframe):
+    """Fetch data from Yahoo Finance (FREE - No API key needed)"""
+    if not YFINANCE_AVAILABLE:
+        st.error("❌ yfinance not installed. Run: pip install yfinance")
+        return None
+    
+    try:
+        # Map timeframe to yfinance interval
+        interval_map = {
+            "5min": "5m",
+            "15min": "15m",
+            "30min": "30m",
+            "1hour": "1h"
+        }
+        interval = interval_map.get(timeframe, "15m")
+        
+        # Download data
+        ticker = yf.Ticker(symbol)
+        df = ticker.history(period="5d", interval=interval)
+        
+        if df.empty:
+            st.warning(f"⚠️ No data for {symbol}. Check symbol format.")
+            return None
+        
+        # Reset index and rename columns
+        df = df.reset_index()
+        df.columns = [col.lower() if col != 'Datetime' else 'timestamp' for col in df.columns]
+        
+        # Keep only needed columns
+        df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
+        df = df.tail(100)
+        
+        st.success(f"✅ Live data loaded from Yahoo Finance (FREE)!")
+        return df
+        
+    except Exception as e:
+        st.error(f"❌ Yahoo Finance Error: {str(e)}")
         return None
 
 
@@ -202,10 +260,10 @@ def fetch_polygon(symbol, timeframe, api_key):
     try:
         # Map symbols for Polygon format
         symbol_map = {
-            "GC=F": "C:GCUSD",  # Gold
-            "SI=F": "C:SIUSD",  # Silver
-            "CL=F": "C:CLUSD",  # Crude Oil
-            "NG=F": "C:NGUSD",  # Natural Gas
+            "GC=F": "X:XAUUSD",  # Gold (Forex pair format)
+            "SI=F": "X:XAGUSD",  # Silver
+            "CL=F": "X:WTIUSD",  # Crude Oil
+            "NG=F": "X:NGUSD",   # Natural Gas
             "EURUSD=X": "C:EURUSD",
             "GBPUSD=X": "C:GBPUSD",
         }
@@ -216,21 +274,30 @@ def fetch_polygon(symbol, timeframe, api_key):
         multiplier_map = {"5min": 5, "15min": 15, "30min": 30, "1hour": 60}
         multiplier = multiplier_map.get(timeframe, 15)
         
-        # Get date range
+        # Get date range - use more recent dates
         to_date = datetime.now()
-        from_date = to_date - timedelta(days=5)
+        from_date = to_date - timedelta(days=2)
         
         url = f"https://api.polygon.io/v2/aggs/ticker/{polygon_symbol}/range/{multiplier}/minute/{from_date.strftime('%Y-%m-%d')}/{to_date.strftime('%Y-%m-%d')}?adjusted=true&sort=asc&apiKey={api_key}"
+        
+        st.info(f"🔍 Trying Polygon with symbol: {polygon_symbol}")
         
         response = requests.get(url, timeout=10)
         data = response.json()
         
+        # Better error handling
+        if data.get('status') == 'ERROR':
+            error_msg = data.get('error', 'Unknown error')
+            st.error(f"❌ Polygon API Error: {error_msg}")
+            st.warning("💡 Polygon free tier requires verification. Try Twelve Data or use stocks with Alpha Vantage.")
+            return None
+        
         if data.get('status') != 'OK':
-            st.error(f"Polygon Error: {data.get('error', 'Unknown error')}")
+            st.warning(f"⚠️ Polygon response: {data.get('status', 'Unknown')} - {data.get('message', '')}")
             return None
         
         if 'results' not in data or not data['results']:
-            st.warning("⚠️ No data from Polygon. Check symbol format or API limits.")
+            st.warning("⚠️ No data from Polygon. This symbol might require a paid plan.")
             return None
         
         results = data['results']
@@ -246,7 +313,8 @@ def fetch_polygon(symbol, timeframe, api_key):
         return df
         
     except Exception as e:
-        st.error(f"Polygon Error: {str(e)}")
+        st.error(f"❌ Polygon Error: {str(e)}")
+        st.info("💡 Try Twelve Data or select a US stock (AAPL, MSFT) with Alpha Vantage")
         return None
 
 
