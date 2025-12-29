@@ -1,1 +1,7 @@
+[global]
+runOnSave = true
 
+[server]
+enableCORS = false
+enableXsrfProtection = false
+headLess = true
