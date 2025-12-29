@@ -285,10 +285,15 @@ def fetch_twelve_data(symbol, timeframe, api_key):
         df = pd.DataFrame(values)
         
         df['timestamp'] = pd.to_datetime(df['datetime'])
-        df = df.rename(columns={'open': 'open', 'high': 'high', 'low': 'low', 'close': 'close', 'volume': 'volume'})
         
-        for col in ['open', 'high', 'low', 'close', 'volume']:
+        # Handle missing volume for forex/commodities
+        for col in ['open', 'high', 'low', 'close']:
             df[col] = pd.to_numeric(df[col])
+        
+        if 'volume' not in df.columns or df['volume'].isna().all():
+            df['volume'] = 1000000  # Default volume for forex/commodities
+        else:
+            df['volume'] = pd.to_numeric(df['volume'])
         
         df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
         df = df.sort_values('timestamp')
