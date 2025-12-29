@@ -1,4 +1,4 @@
 streamlit
 pandas
 plotly
-yfinance
+requests  # Add this if not there (for API call)
