@@ -70,7 +70,12 @@ with st.sidebar:
     timeframe = st.selectbox("⏱️ Timeframe", ["5min", "15min", "30min", "1hour"], index=1)
     
     # API Key input
-    api_key = st.text_input("🔑 API Key", type="password", help="Enter your financial data API key (Alpha Vantage, Polygon, etc.)")
+    api_key = st.text_input("🔑 API Key", type="password", help="Enter your Alpha Vantage API key", key="api_key_input")
+    
+    if api_key:
+        st.success(f"✅ API Key entered ({len(api_key)} chars)")
+    else:
+        st.info("💡 Using demo data - Enter API key for live data")
     
     st.markdown("---")
     
@@ -403,8 +408,23 @@ if df is not None and len(df) > 0:
                     use_container_width=True)
 
 else:
-    st.warning("⚠️ Please enter your API key to fetch live data, or the app will use demo data.")
-    st.info("💡 **Setup Instructions:**\n1. Get a free API key from Alpha Vantage, Polygon.io, or your preferred provider\n2. Enter the API key in the sidebar\n3. Select your instrument and timeframe\n4. Enable auto-refresh for real-time updates")
+    st.warning("⚠️ No data available")
+    st.info("💡 **To get live data:**\n\n1. Get FREE API key: https://www.alphavantage.co/support/#api-key\n2. Paste your API key in the sidebar (🔑 API Key field)\n3. Select a US stock symbol (AAPL, MSFT, TSLA, etc.)\n4. Click 'Refresh Now' button\n\n**Current Status:**")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        if api_key:
+            st.success(f"✅ API Key: Entered ({len(api_key)} characters)")
+        else:
+            st.error("❌ API Key: Not entered")
+    
+    with col2:
+        st.info(f"📊 Symbol: {symbol}")
+        st.info(f"⏱️ Timeframe: {timeframe}")
+    
+    st.markdown("---")
+    st.markdown("**Test your API key here:** https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol=IBM&interval=5min&apikey=YOUR_KEY")
+    st.markdown("Replace YOUR_KEY with your actual key and open in browser to test.")
 
 # Auto-refresh logic
 if st.session_state.auto_refresh:
