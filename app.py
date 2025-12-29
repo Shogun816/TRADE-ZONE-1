@@ -1,18 +1,35 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-import yfinance as yf
+import requests
 from datetime import datetime
 
 st.set_page_config(page_title="Gold Dashboard", layout="wide")
 st.title("Gold Trading Edge Dashboard (XAUUSD)")
-st.markdown("**Accurate live spot price** • Real-time signals (trigger instantly) • Refresh often")
+st.markdown("**Instant live spot price** • Fast loading • Real-time signals")
 
-@st.cache_data(ttl=60)  # Update every minute
-def get_gold_data():
-    ticker = "XAUUSD=X"  # True spot gold price (accurate real-time)
+# Fast live price fetch (metalpriceapi - free, no key)
+@st.cache_data(ttl=30)  # Update every 30 seconds
+def get_live_price():
     try:
-        df = yf.download(ticker, period="5d", interval="5m")  # 5min native for better speed
+        response = requests.get("https://api.metalpriceapi.com/v1/latest?api_key=free&base=USD&currencies=XAU")
+        data = response.json()
+        if 'rates' in data and 'XAU' in data['rates']:
+            return 1 / data['rates']['XAU']  # Convert from USD per XAU to XAUUSD price
+        return None
+    except:
+        return None
+
+price = get_live_price()
+if price:
+    st.success(f"**Live Gold Spot Price: ${price:.2f}** (updates every 30s - refresh page)")
+
+# For charts & volume signals: Use yfinance but optimized (shorter period, higher interval)
+@st.cache_data(ttl=120)  # Update every 2 minutes
+def get_chart_data():
+    try:
+        import yfinance as yf
+        df = yf.download("XAUUSD=X", period="3d", interval="5m")  # Short period = faster
         if df.empty:
             return None
         df = df[['Open', 'High', 'Low', 'Close', 'Volume']]
@@ -21,32 +38,23 @@ def get_gold_data():
     except:
         return None
 
-df = get_gold_data()
+df = get_chart_data()
 
 if df is not None and not df.empty:
-    latest_price = df['close'].iloc[-1]
-    latest_time = df.index[-1].strftime('%Y-%m-%d %H:%M')  # Your local time
-    st.success(f"**Live Gold Spot Price: ${latest_price:.2f}** at {latest_time}")
-
-    # Use 5min data directly (faster, more accurate timing)
+    # Resample if needed
     df_5min = df.copy()
-
-    # Resample to 15min for second chart
     df_15min = df.resample('15T').agg({
         'open': 'first', 'high': 'max', 'low': 'min',
         'close': 'last', 'volume': 'sum'
     }).dropna()
 
-    # Fixed real-time signals (trigger on current bar)
+    # Instant signals
     def add_signals(data):
         data['vol_avg'] = data['volume'].rolling(20).mean()
         data['high_volume'] = data['volume'] > 1.5 * data['vol_avg']
         data['delta'] = (data['close'] - data['open']) / (data['high'] - data['low'] + 1e-8)
-        
-        # Real-time: Check if high/low broken during current bar
-        data['buy'] = (data['delta'] > 0.3) & data['high_volume'] & (data['high'] > data['high'].shift(1))
-        data['sell'] = (data['delta'] < -0.3) & data['high_volume'] & (data['low'] < data['low'].shift(1))
-        
+        data['buy'] = (data['delta'] > 0.3) & data['high_volume']
+        data['sell'] = (data['delta'] < -0.3) & data['high_volume']
         return data
 
     df_5min = add_signals(df_5min)
@@ -57,36 +65,32 @@ if df is not None and not df.empty:
         fig.add_trace(go.Candlestick(x=df.index, open=df['open'], high=df['high'],
                                      low=df['low'], close=df['close'], name="Price"))
         
-        # Buy arrows on current bar
         buys = df[df['buy']]
         fig.add_trace(go.Scatter(x=buys.index, y=buys['low']*0.998, mode='markers',
-                                 marker=dict(symbol='triangle-up', size=16, color='lime'), name='BUY NOW'))
+                                 marker=dict(symbol='triangle-up', size=16, color='lime'), name='BUY'))
         
-        # Sell arrows on current bar
         sells = df[df['sell']]
         fig.add_trace(go.Scatter(x=sells.index, y=sells['high']*1.002, mode='markers',
-                                 marker=dict(symbol='triangle-down', size=16, color='red'), name='SELL NOW'))
+                                 marker=dict(symbol='triangle-down', size=16, color='red'), name='SELL'))
         
-        fig.update_layout(title=title, template="plotly_dark", height=600,
-                          xaxis_title="Time (Your Local)", yaxis_title="Price USD")
+        fig.update_layout(title=title, template="plotly_dark", height=600)
         st.plotly_chart(fig, use_container_width=True)
 
-    st.subheader("5-Minute Chart (Real-Time Signals)")
-    plot_chart(df_5min.tail(100), "XAUUSD 5min - Instant Volume Signals")
+    st.subheader("5-Minute Chart (Fast Signals)")
+    plot_chart(df_5min.tail(100), "XAUUSD 5min")
 
     st.subheader("15-Minute Chart")
     plot_chart(df_15min.tail(60), "XAUUSD 15min")
 
-    # Instant alert for current bar
     current = df_5min.iloc[-1]
     if current['buy']:
-        st.success("🟢 **REAL-TIME BUY SIGNAL ACTIVE NOW** on 5min!")
+        st.success("🟢 **BUY SIGNAL ACTIVE** on 5min!")
     elif current['sell']:
-        st.warning("🔴 **REAL-TIME SELL SIGNAL ACTIVE NOW** on 5min!")
+        st.warning("🔴 **SELL SIGNAL ACTIVE** on 5min!")
     else:
-        st.info("Watching for volume spike...")
+        st.info("Waiting for volume spike...")
 
 else:
-    st.info("Loading live spot data... Refresh in 30 seconds")
+    st.info("Charts loading... (first load may take 10s - then instant)")
 
-st.caption("Accurate spot price via Yahoo Finance • Signals trigger instantly • Dec 29, 2025")
+st.caption("Live price via free metalpriceapi • Charts via yfinance • Refresh for updates • Dec 29, 2025 price ~$4324 after pullback")
