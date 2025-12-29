@@ -89,31 +89,106 @@ with st.sidebar:
 
 def fetch_live_data(symbol, timeframe, api_key):
     """
-    Fetch live data from your API provider
-    Replace this with your actual API integration
+    Fetch live data from Alpha Vantage API
     """
-    # Example using Alpha Vantage (replace with your API)
-    if not api_key:
+    if not api_key or len(api_key) < 10:
         # Generate dummy data for demo
         dates = pd.date_range(end=datetime.now(), periods=100, freq='5min')
+        base_price = np.random.uniform(100, 200)
         df = pd.DataFrame({
             'timestamp': dates,
-            'open': np.random.uniform(100, 110, 100),
-            'high': np.random.uniform(105, 115, 100),
-            'low': np.random.uniform(95, 105, 100),
-            'close': np.random.uniform(100, 110, 100),
+            'open': base_price + np.random.uniform(-5, 5, 100),
+            'high': base_price + np.random.uniform(0, 8, 100),
+            'low': base_price + np.random.uniform(-8, 0, 100),
+            'close': base_price + np.random.uniform(-5, 5, 100),
             'volume': np.random.randint(1000000, 10000000, 100)
         })
         return df
     
-    # TODO: Implement your actual API call here
-    # Example for Alpha Vantage:
-    # url = f"https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol={symbol}&interval={timeframe}&apikey={api_key}"
-    # response = requests.get(url)
-    # data = response.json()
-    # Parse and return DataFrame
-    
-    return None
+    try:
+        # Map timeframe to Alpha Vantage format
+        interval_map = {
+            "5min": "5min",
+            "15min": "15min",
+            "30min": "30min",
+            "1hour": "60min"
+        }
+        interval = interval_map.get(timeframe, "15min")
+        
+        # Clean symbol for API call
+        clean_symbol = symbol.replace("=X", "").replace("=F", "")
+        
+        # Alpha Vantage API call
+        url = f"https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol={clean_symbol}&interval={interval}&apikey={api_key}&outputsize=full"
+        
+        response = requests.get(url, timeout=10)
+        data = response.json()
+        
+        # Check for API errors
+        if "Error Message" in data:
+            st.error(f"API Error: {data['Error Message']}")
+            return None
+        
+        if "Note" in data:
+            st.warning(f"API Limit: {data['Note']}")
+            return None
+            
+        # Parse the time series data
+        time_series_key = f"Time Series ({interval})"
+        
+        if time_series_key not in data:
+            st.warning("⚠️ API returned no data. Using demo data. Check your API key or try a different symbol.")
+            # Return demo data as fallback
+            dates = pd.date_range(end=datetime.now(), periods=100, freq='5min')
+            base_price = np.random.uniform(100, 200)
+            df = pd.DataFrame({
+                'timestamp': dates,
+                'open': base_price + np.random.uniform(-5, 5, 100),
+                'high': base_price + np.random.uniform(0, 8, 100),
+                'low': base_price + np.random.uniform(-8, 0, 100),
+                'close': base_price + np.random.uniform(-5, 5, 100),
+                'volume': np.random.randint(1000000, 10000000, 100)
+            })
+            return df
+        
+        time_series = data[time_series_key]
+        
+        # Convert to DataFrame
+        df = pd.DataFrame.from_dict(time_series, orient='index')
+        df.index = pd.to_datetime(df.index)
+        df = df.sort_index()
+        
+        # Rename columns
+        df.columns = ['open', 'high', 'low', 'close', 'volume']
+        
+        # Convert to numeric
+        for col in df.columns:
+            df[col] = pd.to_numeric(df[col])
+        
+        # Reset index to have timestamp as column
+        df = df.reset_index()
+        df.columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
+        
+        # Take last 100 data points
+        df = df.tail(100)
+        
+        st.success(f"✅ Live data loaded for {symbol}!")
+        return df
+        
+    except Exception as e:
+        st.error(f"Error fetching data: {str(e)}")
+        # Return demo data as fallback
+        dates = pd.date_range(end=datetime.now(), periods=100, freq='5min')
+        base_price = np.random.uniform(100, 200)
+        df = pd.DataFrame({
+            'timestamp': dates,
+            'open': base_price + np.random.uniform(-5, 5, 100),
+            'high': base_price + np.random.uniform(0, 8, 100),
+            'low': base_price + np.random.uniform(-8, 0, 100),
+            'close': base_price + np.random.uniform(-5, 5, 100),
+            'volume': np.random.randint(1000000, 10000000, 100)
+        })
+        return df
 
 
 def calculate_indicators(df):
