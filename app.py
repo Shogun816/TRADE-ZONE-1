@@ -6,6 +6,7 @@ import requests
 from datetime import datetime, timedelta
 import time
 import numpy as np
+import pytz
 
 # Try to import yfinance
 try:
@@ -13,6 +14,9 @@ try:
     YFINANCE_AVAILABLE = True
 except ImportError:
     YFINANCE_AVAILABLE = False
+
+# New York timezone
+NY_TZ = pytz.timezone('America/New_York')
 
 # Page config
 st.set_page_config(page_title="Trading Signals Pro", layout="wide", initial_sidebar_state="expanded")
@@ -227,8 +231,19 @@ def fetch_yahoo_finance(symbol, timeframe):
         
         df = df.reset_index()
         df.columns = [col.lower() if col != 'Datetime' else 'timestamp' for col in df.columns]
+        
+        # Convert to New York timezone
+        if 'timestamp' in df.columns:
+            df['timestamp'] = pd.to_datetime(df['timestamp'])
+            if df['timestamp'].dt.tz is not None:
+                df['timestamp'] = df['timestamp'].dt.tz_convert(NY_TZ)
+            else:
+                df['timestamp'] = df['timestamp'].dt.tz_localize('UTC').dt.tz_convert(NY_TZ)
+        
         df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
-        df = df.tail(100)
+        
+        # Get last 50 candles for cleaner chart (was 100)
+        df = df.tail(50)
         
         st.success(f"✅ Live data loaded from Yahoo Finance!")
         return df
@@ -243,16 +258,16 @@ def fetch_live_data(symbol, timeframe, api_key, api_provider):
     if "Yahoo Finance" in api_provider:
         return fetch_yahoo_finance(symbol, timeframe)
     else:
-        # Generate demo data
-        dates = pd.date_range(end=datetime.now(), periods=100, freq='5min')
+        # Generate demo data with NY timezone
+        dates = pd.date_range(end=datetime.now(NY_TZ), periods=50, freq='5min')
         base_price = np.random.uniform(100, 200)
         df = pd.DataFrame({
             'timestamp': dates,
-            'open': base_price + np.random.uniform(-5, 5, 100),
-            'high': base_price + np.random.uniform(0, 8, 100),
-            'low': base_price + np.random.uniform(-8, 0, 100),
-            'close': base_price + np.random.uniform(-5, 5, 100),
-            'volume': np.random.randint(1000000, 10000000, 100)
+            'open': base_price + np.random.uniform(-5, 5, 50),
+            'high': base_price + np.random.uniform(0, 8, 50),
+            'low': base_price + np.random.uniform(-8, 0, 50),
+            'close': base_price + np.random.uniform(-5, 5, 50),
+            'volume': np.random.randint(1000000, 10000000, 50)
         })
         return df
 
@@ -344,18 +359,16 @@ def generate_signals(df, rsi_oversold, rsi_overbought):
 
 
 def create_advanced_chart(df, ema_fast, ema_slow, rsi_oversold, rsi_overbought, symbol, timeframe):
-    """Create advanced trading chart with color-coded signals"""
+    """Create clean, spaced-out trading chart for real-time analysis"""
     fig = make_subplots(
         rows=3, cols=1,
         shared_xaxes=True,
-        vertical_spacing=0.03,
-        row_heights=[0.6, 0.2, 0.2],
-        subplot_titles=(f'{symbol} - {timeframe} - Price Action', 'RSI Indicator', 'Volume Profile')
+        vertical_spacing=0.05,
+        row_heights=[0.55, 0.25, 0.20],
+        subplot_titles=(f'{symbol} - {timeframe} - LIVE PRICE ACTION', 'RSI INDICATOR', 'VOLUME')
     )
     
-    # Candlestick with custom colors
-    colors = ['red' if row['close'] < row['open'] else 'green' for _, row in df.iterrows()]
-    
+    # Candlestick with better visibility
     fig.add_trace(go.Candlestick(
         x=df['timestamp'],
         open=df['open'],
@@ -364,22 +377,28 @@ def create_advanced_chart(df, ema_fast, ema_slow, rsi_oversold, rsi_overbought, 
         close=df['close'],
         name='Price',
         increasing_line_color='#00ff00',
-        decreasing_line_color='#ff0000'
+        increasing_fillcolor='#00ff00',
+        decreasing_line_color='#ff0000',
+        decreasing_fillcolor='#ff0000',
+        increasing_line_width=2,
+        decreasing_line_width=2
     ), row=1, col=1)
     
-    # EMAs with thicker lines
+    # EMAs with contrasting colors
     fig.add_trace(go.Scatter(
         x=df['timestamp'], 
         y=df['ema_fast'],
-        name=f'EMA {ema_fast}',
-        line=dict(color='cyan', width=2)
+        name=f'Fast EMA {ema_fast}',
+        line=dict(color='#00ffff', width=3),
+        mode='lines'
     ), row=1, col=1)
     
     fig.add_trace(go.Scatter(
         x=df['timestamp'], 
         y=df['ema_slow'],
-        name=f'EMA {ema_slow}',
-        line=dict(color='orange', width=2)
+        name=f'Slow EMA {ema_slow}',
+        line=dict(color='#ffa500', width=3),
+        mode='lines'
     ), row=1, col=1)
     
     # VWAP
@@ -387,90 +406,158 @@ def create_advanced_chart(df, ema_fast, ema_slow, rsi_oversold, rsi_overbought, 
         x=df['timestamp'], 
         y=df['vwap'],
         name='VWAP',
-        line=dict(color='purple', width=2, dash='dash')
+        line=dict(color='#ff00ff', width=2, dash='dash'),
+        mode='lines'
     ), row=1, col=1)
     
-    # Mark EMA crossovers
+    # Mark ONLY significant EMA crossovers (reduce clutter)
+    crossovers = []
     for i in range(1, len(df)):
+        # Bullish crossover
         if df['ema_fast'].iloc[i] > df['ema_slow'].iloc[i] and df['ema_fast'].iloc[i-1] <= df['ema_slow'].iloc[i-1]:
-            fig.add_annotation(
-                x=df['timestamp'].iloc[i],
-                y=df['low'].iloc[i],
-                text="▲ BUY",
-                showarrow=True,
-                arrowhead=2,
-                arrowcolor="green",
-                ax=0,
-                ay=40,
-                font=dict(color="green", size=12),
-                row=1, col=1
-            )
+            # Check if volume supports the signal
+            if df['vol_ratio'].iloc[i] > 1.2:
+                fig.add_annotation(
+                    x=df['timestamp'].iloc[i],
+                    y=df['low'].iloc[i] * 0.998,
+                    text="🟢 BUY",
+                    showarrow=True,
+                    arrowhead=2,
+                    arrowcolor="lime",
+                    arrowsize=1.5,
+                    arrowwidth=3,
+                    ax=0,
+                    ay=50,
+                    font=dict(color="lime", size=14, family="Arial Black"),
+                    bgcolor="rgba(0,255,0,0.3)",
+                    bordercolor="lime",
+                    borderwidth=2,
+                    row=1, col=1
+                )
+        # Bearish crossover
         elif df['ema_fast'].iloc[i] < df['ema_slow'].iloc[i] and df['ema_fast'].iloc[i-1] >= df['ema_slow'].iloc[i-1]:
-            fig.add_annotation(
-                x=df['timestamp'].iloc[i],
-                y=df['high'].iloc[i],
-                text="▼ SELL",
-                showarrow=True,
-                arrowhead=2,
-                arrowcolor="red",
-                ax=0,
-                ay=-40,
-                font=dict(color="red", size=12),
-                row=1, col=1
-            )
+            if df['vol_ratio'].iloc[i] > 1.2:
+                fig.add_annotation(
+                    x=df['timestamp'].iloc[i],
+                    y=df['high'].iloc[i] * 1.002,
+                    text="🔴 SELL",
+                    showarrow=True,
+                    arrowhead=2,
+                    arrowcolor="red",
+                    arrowsize=1.5,
+                    arrowwidth=3,
+                    ax=0,
+                    ay=-50,
+                    font=dict(color="red", size=14, family="Arial Black"),
+                    bgcolor="rgba(255,0,0,0.3)",
+                    bordercolor="red",
+                    borderwidth=2,
+                    row=1, col=1
+                )
     
-    # RSI with zones
+    # RSI with cleaner zones
     fig.add_trace(go.Scatter(
         x=df['timestamp'], 
         y=df['rsi'],
         name='RSI',
-        line=dict(color='yellow', width=3)
+        line=dict(color='#ffff00', width=4),
+        fill='tonexty',
+        mode='lines'
     ), row=2, col=1)
     
-    # RSI levels
-    fig.add_hline(y=rsi_overbought, line_dash="dash", line_color="red", line_width=2, row=2, col=1)
-    fig.add_hline(y=50, line_dash="dot", line_color="white", line_width=1, row=2, col=1)
-    fig.add_hline(y=rsi_oversold, line_dash="dash", line_color="green", line_width=2, row=2, col=1)
+    # RSI reference lines
+    fig.add_hline(y=rsi_overbought, line_dash="solid", line_color="red", line_width=3, 
+                  annotation_text=f"Overbought {rsi_overbought}", annotation_position="right",
+                  row=2, col=1)
+    fig.add_hline(y=50, line_dash="dot", line_color="gray", line_width=1, row=2, col=1)
+    fig.add_hline(y=rsi_oversold, line_dash="solid", line_color="lime", line_width=3,
+                  annotation_text=f"Oversold {rsi_oversold}", annotation_position="right",
+                  row=2, col=1)
     
-    # Color zones for RSI
-    fig.add_hrect(y0=rsi_overbought, y1=100, fillcolor="red", opacity=0.1, row=2, col=1)
-    fig.add_hrect(y0=0, y1=rsi_oversold, fillcolor="green", opacity=0.1, row=2, col=1)
+    # Highlight RSI danger zones
+    fig.add_hrect(y0=rsi_overbought, y1=100, fillcolor="red", opacity=0.15, 
+                  annotation_text="SELL ZONE", annotation_position="top left",
+                  row=2, col=1)
+    fig.add_hrect(y0=0, y1=rsi_oversold, fillcolor="green", opacity=0.15,
+                  annotation_text="BUY ZONE", annotation_position="bottom left",
+                  row=2, col=1)
     
-    # Volume with colors
-    volume_colors = ['red' if df['close'].iloc[i] < df['open'].iloc[i] else 'green' 
-                     for i in range(len(df))]
+    # Volume with gradient colors
+    volume_colors = []
+    for i in range(len(df)):
+        if df['close'].iloc[i] >= df['open'].iloc[i]:
+            # Green candle - check strength
+            if df['vol_ratio'].iloc[i] > 1.5:
+                volume_colors.append('lime')  # High volume green
+            else:
+                volume_colors.append('green')  # Normal green
+        else:
+            # Red candle - check strength
+            if df['vol_ratio'].iloc[i] > 1.5:
+                volume_colors.append('#ff0000')  # High volume red
+            else:
+                volume_colors.append('#cc0000')  # Normal red
     
     fig.add_trace(go.Bar(
         x=df['timestamp'], 
         y=df['volume'],
         name='Volume',
         marker_color=volume_colors,
-        showlegend=False
+        showlegend=False,
+        opacity=0.7
     ), row=3, col=1)
     
-    # Volume MA
+    # Volume MA line
     fig.add_trace(go.Scatter(
         x=df['timestamp'], 
         y=df['vol_ma'],
-        name='Vol MA',
-        line=dict(color='white', width=1, dash='dash')
+        name='Avg Volume',
+        line=dict(color='yellow', width=2, dash='dash'),
+        mode='lines'
     ), row=3, col=1)
     
+    # Layout updates for better spacing
     fig.update_layout(
         title=dict(
-            text=f'{symbol} - {timeframe} Live Chart',
-            font=dict(size=24, color='white')
+            text=f'{symbol} - {timeframe} - Real-Time Trading Chart (NY Time)',
+            font=dict(size=26, color='white', family='Arial Black'),
+            x=0.5,
+            xanchor='center'
         ),
         template='plotly_dark',
-        height=900,
+        height=1000,
         showlegend=True,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+            font=dict(size=12)
+        ),
         xaxis_rangeslider_visible=False,
-        hovermode='x unified'
+        hovermode='x unified',
+        plot_bgcolor='#0a0a0a',
+        paper_bgcolor='#0e1117',
+        margin=dict(l=80, r=80, t=100, b=80)
     )
     
-    fig.update_yaxes(title_text="Price ($)", row=1, col=1)
-    fig.update_yaxes(title_text="RSI", row=2, col=1)
-    fig.update_yaxes(title_text="Volume", row=3, col=1)
+    # Better axis formatting
+    fig.update_xaxes(
+        showgrid=True, 
+        gridwidth=1, 
+        gridcolor='#333333',
+        tickformat='%I:%M %p',  # 12-hour format with AM/PM
+        dtick=300000 if timeframe == "5min" else 900000,  # Show fewer time labels
+        row=3, col=1
+    )
+    
+    fig.update_yaxes(title_text="Price ($)", titlefont=dict(size=14), row=1, col=1)
+    fig.update_yaxes(title_text="RSI", titlefont=dict(size=14), range=[0, 100], row=2, col=1)
+    fig.update_yaxes(title_text="Volume", titlefont=dict(size=14), row=3, col=1)
+    
+    # Add gridlines for better reading
+    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='#333333')
     
     return fig
 
@@ -503,7 +590,9 @@ with col1:
     st.markdown(f"## {symbol}")
 
 with col2:
-    st.markdown(f"**Last Update:** {datetime.now().strftime('%H:%M:%S')}")
+    ny_time = datetime.now(NY_TZ)
+    st.markdown(f"**NY Time:** {ny_time.strftime('%I:%M:%S %p')}")
+    st.markdown(f"**Date:** {ny_time.strftime('%m/%d/%Y')}")
 
 with col3:
     status = "🟢 LIVE" if st.session_state.auto_refresh else "⚪ PAUSED"
