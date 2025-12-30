@@ -6,17 +6,21 @@ import requests
 from datetime import datetime, timedelta
 import time
 import numpy as np
-import pytz
 
-# Try to import yfinance
+# Try to import required libraries
 try:
     import yfinance as yf
     YFINANCE_AVAILABLE = True
 except ImportError:
     YFINANCE_AVAILABLE = False
 
-# New York timezone
-NY_TZ = pytz.timezone('America/New_York')
+try:
+    import pytz
+    NY_TZ = pytz.timezone('America/New_York')
+    PYTZ_AVAILABLE = True
+except ImportError:
+    PYTZ_AVAILABLE = False
+    NY_TZ = None
 
 # Page config
 st.set_page_config(page_title="Trading Signals Pro", layout="wide", initial_sidebar_state="expanded")
@@ -232,8 +236,8 @@ def fetch_yahoo_finance(symbol, timeframe):
         df = df.reset_index()
         df.columns = [col.lower() if col != 'Datetime' else 'timestamp' for col in df.columns]
         
-        # Convert to New York timezone
-        if 'timestamp' in df.columns:
+        # Convert to New York timezone if pytz is available
+        if 'timestamp' in df.columns and PYTZ_AVAILABLE:
             df['timestamp'] = pd.to_datetime(df['timestamp'])
             if df['timestamp'].dt.tz is not None:
                 df['timestamp'] = df['timestamp'].dt.tz_convert(NY_TZ)
@@ -242,7 +246,7 @@ def fetch_yahoo_finance(symbol, timeframe):
         
         df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
         
-        # Get last 50 candles for cleaner chart (was 100)
+        # Get last 50 candles for cleaner chart
         df = df.tail(50)
         
         st.success(f"✅ Live data loaded from Yahoo Finance!")
@@ -258,8 +262,12 @@ def fetch_live_data(symbol, timeframe, api_key, api_provider):
     if "Yahoo Finance" in api_provider:
         return fetch_yahoo_finance(symbol, timeframe)
     else:
-        # Generate demo data with NY timezone
-        dates = pd.date_range(end=datetime.now(NY_TZ), periods=50, freq='5min')
+        # Generate demo data with timezone if available
+        if PYTZ_AVAILABLE:
+            dates = pd.date_range(end=datetime.now(NY_TZ), periods=50, freq='5min')
+        else:
+            dates = pd.date_range(end=datetime.now(), periods=50, freq='5min')
+        
         base_price = np.random.uniform(100, 200)
         df = pd.DataFrame({
             'timestamp': dates,
@@ -542,22 +550,18 @@ def create_advanced_chart(df, ema_fast, ema_slow, rsi_oversold, rsi_overbought, 
         margin=dict(l=80, r=80, t=100, b=80)
     )
     
-    # Better axis formatting
+    # Better axis formatting - apply to all x-axes
     fig.update_xaxes(
         showgrid=True, 
         gridwidth=1, 
         gridcolor='#333333',
-        tickformat='%I:%M %p',  # 12-hour format with AM/PM
-        dtick=300000 if timeframe == "5min" else 900000,  # Show fewer time labels
-        row=3, col=1
+        tickformat='%I:%M %p'  # 12-hour format with AM/PM
     )
     
-    fig.update_yaxes(title_text="Price ($)", titlefont=dict(size=14), row=1, col=1)
-    fig.update_yaxes(title_text="RSI", titlefont=dict(size=14), range=[0, 100], row=2, col=1)
-    fig.update_yaxes(title_text="Volume", titlefont=dict(size=14), row=3, col=1)
-    
-    # Add gridlines for better reading
-    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='#333333')
+    # Update y-axes with proper formatting
+    fig.update_yaxes(title_text="Price ($)", row=1, col=1, showgrid=True, gridwidth=1, gridcolor='#333333')
+    fig.update_yaxes(title_text="RSI", row=2, col=1, range=[0, 100], showgrid=True, gridwidth=1, gridcolor='#333333')
+    fig.update_yaxes(title_text="Volume", row=3, col=1, showgrid=True, gridwidth=1, gridcolor='#333333')
     
     return fig
 
@@ -590,9 +594,14 @@ with col1:
     st.markdown(f"## {symbol}")
 
 with col2:
-    ny_time = datetime.now(NY_TZ)
-    st.markdown(f"**NY Time:** {ny_time.strftime('%I:%M:%S %p')}")
-    st.markdown(f"**Date:** {ny_time.strftime('%m/%d/%Y')}")
+    if PYTZ_AVAILABLE:
+        ny_time = datetime.now(NY_TZ)
+        st.markdown(f"**NY Time:** {ny_time.strftime('%I:%M:%S %p')}")
+        st.markdown(f"**Date:** {ny_time.strftime('%m/%d/%Y')}")
+    else:
+        current_time = datetime.now()
+        st.markdown(f"**Time:** {current_time.strftime('%I:%M:%S %p')}")
+        st.markdown(f"**Date:** {current_time.strftime('%m/%d/%Y')}")
 
 with col3:
     status = "🟢 LIVE" if st.session_state.auto_refresh else "⚪ PAUSED"
