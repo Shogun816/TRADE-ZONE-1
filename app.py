@@ -97,9 +97,9 @@ st.markdown("""
 # Trading instruments by category
 INSTRUMENTS = {
     "Stocks": ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "NVDA", "META", "JPM", "V", "WMT"],
-    "Indices": ["^GSPC", "^IXIC", "^NDX", "^DJI", "SPY", "QQQ", "DIA", "IWM", "^VIX"],
+    "Indices": ["^GSPC", "^IXIC", "^NDX", "^DJI", "NQ=F", "ES=F", "SPY", "QQQ", "DIA", "IWM", "^VIX"],
     "Commodities": ["GC=F", "CL=F", "NG=F", "ZC=F", "ZS=F"],
-    "Metals": ["XAUUSD=X", "GC=F", "SI=F", "PL=F", "PA=F", "HG=F"],
+    "Metals": ["GC=F", "SI=F", "GOLD", "PL=F", "PA=F", "HG=F"],
     "Forex": ["EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X", "USDCAD=X"]
 }
 
