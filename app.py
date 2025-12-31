@@ -567,56 +567,109 @@ def create_advanced_chart(df, ema_fast, ema_slow, rsi_oversold, rsi_overbought, 
 
 
 def play_alert_sound(signal_type):
-    """Play human voice alert for signals"""
+    """Display voice alert notification prominently"""
     if st.session_state.sound_enabled and signal_type != st.session_state.last_signal:
+        
         if "STRONG BUY" in signal_type:
-            # Strong buy voice alert
             st.markdown("""
-                <script>
-                const msg = new SpeechSynthesisUtterance();
-                msg.text = "Strong buy signal detected! Enter long position now!";
-                msg.volume = 1;
-                msg.rate = 1.1;
-                msg.pitch = 1;
-                window.speechSynthesis.speak(msg);
-                </script>
+            <div style='background: linear-gradient(135deg, #00ff00 0%, #00cc00 100%); 
+                        padding: 20px; 
+                        border-radius: 15px; 
+                        text-align: center;
+                        animation: pulse 1s infinite;
+                        box-shadow: 0 0 30px #00ff00;
+                        margin: 20px 0;'>
+                <div style='font-size: 32px; font-weight: bold; color: black;'>
+                    🔊 VOICE ALERT 🔊
+                </div>
+                <div style='font-size: 24px; color: black; margin-top: 10px;'>
+                    "STRONG BUY SIGNAL DETECTED!"
+                </div>
+                <div style='font-size: 20px; color: #003300; margin-top: 5px;'>
+                    "ENTER LONG POSITION NOW!"
+                </div>
+            </div>
+            <style>
+            @keyframes pulse {
+                0%, 100% { opacity: 1; transform: scale(1); }
+                50% { opacity: 0.8; transform: scale(1.02); }
+            }
+            </style>
             """, unsafe_allow_html=True)
+            
         elif "BUY" in signal_type:
-            # Buy voice alert
             st.markdown("""
-                <script>
-                const msg = new SpeechSynthesisUtterance();
-                msg.text = "Buy signal! Good entry opportunity!";
-                msg.volume = 1;
-                msg.rate = 1.1;
-                msg.pitch = 1;
-                window.speechSynthesis.speak(msg);
-                </script>
+            <div style='background: linear-gradient(135deg, #00ff00 0%, #66ff66 100%); 
+                        padding: 20px; 
+                        border-radius: 15px; 
+                        text-align: center;
+                        box-shadow: 0 0 20px #00ff00;
+                        margin: 20px 0;'>
+                <div style='font-size: 28px; font-weight: bold; color: black;'>
+                    🔊 VOICE ALERT 🔊
+                </div>
+                <div style='font-size: 22px; color: black; margin-top: 10px;'>
+                    "BUY SIGNAL!"
+                </div>
+                <div style='font-size: 18px; color: #003300; margin-top: 5px;'>
+                    "GOOD ENTRY OPPORTUNITY!"
+                </div>
+            </div>
             """, unsafe_allow_html=True)
+            
         elif "STRONG SELL" in signal_type:
-            # Strong sell voice alert
             st.markdown("""
-                <script>
-                const msg = new SpeechSynthesisUtterance();
-                msg.text = "Strong sell signal! Exit position immediately!";
-                msg.volume = 1;
-                msg.rate = 1.1;
-                msg.pitch = 0.9;
-                window.speechSynthesis.speak(msg);
-                </script>
+            <div style='background: linear-gradient(135deg, #ff0000 0%, #cc0000 100%); 
+                        padding: 20px; 
+                        border-radius: 15px; 
+                        text-align: center;
+                        animation: pulse 1s infinite;
+                        box-shadow: 0 0 30px #ff0000;
+                        margin: 20px 0;'>
+                <div style='font-size: 32px; font-weight: bold; color: white;'>
+                    🔊 VOICE ALERT 🔊
+                </div>
+                <div style='font-size: 24px; color: white; margin-top: 10px;'>
+                    "STRONG SELL SIGNAL!"
+                </div>
+                <div style='font-size: 20px; color: #ffcccc; margin-top: 5px;'>
+                    "EXIT POSITION IMMEDIATELY!"
+                </div>
+            </div>
+            <style>
+            @keyframes pulse {
+                0%, 100% { opacity: 1; transform: scale(1); }
+                50% { opacity: 0.8; transform: scale(1.02); }
+            }
+            </style>
             """, unsafe_allow_html=True)
+            
         elif "SELL" in signal_type:
-            # Sell voice alert
             st.markdown("""
-                <script>
-                const msg = new SpeechSynthesisUtterance();
-                msg.text = "Sell signal detected! Consider taking profits!";
-                msg.volume = 1;
-                msg.rate = 1.1;
-                msg.pitch = 0.9;
-                window.speechSynthesis.speak(msg);
-                </script>
+            <div style='background: linear-gradient(135deg, #ff0000 0%, #ff6666 100%); 
+                        padding: 20px; 
+                        border-radius: 15px; 
+                        text-align: center;
+                        box-shadow: 0 0 20px #ff0000;
+                        margin: 20px 0;'>
+                <div style='font-size: 28px; font-weight: bold; color: white;'>
+                    🔊 VOICE ALERT 🔊
+                </div>
+                <div style='font-size: 22px; color: white; margin-top: 10px;'>
+                    "SELL SIGNAL DETECTED!"
+                </div>
+                <div style='font-size: 18px; color: #ffcccc; margin-top: 5px;'>
+                    "CONSIDER TAKING PROFITS!"
+                </div>
+            </div>
             """, unsafe_allow_html=True)
+        
+        # Also play a browser beep sound
+        st.markdown("""
+            <audio autoplay>
+                <source src="data:audio/wav;base64,UklGRpYAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YXIAAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIA=" type="audio/wav">
+            </audio>
+        """, unsafe_allow_html=True)
         
         st.session_state.last_signal = signal_type
 
@@ -693,7 +746,7 @@ if df is not None and len(df) > 0:
     df = calculate_indicators(df, rsi_period, ema_fast, ema_slow)
     signal_type, signals, latest, signal_strength = generate_signals(df, rsi_oversold, rsi_overbought)
     
-    # Play alert sound
+    # Play alert sound and show voice notification
     play_alert_sound(signal_type)
     
     # Display main signal box
