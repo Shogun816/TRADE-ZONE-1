@@ -1,4 +1,5 @@
-pip install pytz yfinance plotly pandas numpy streamlit --upgrade
-
-# Then restart
-streamlit run trading_app.py
+streamlit
+pandas
+plotly
+yfinance
+requests
