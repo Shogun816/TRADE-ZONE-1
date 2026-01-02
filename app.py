@@ -281,7 +281,7 @@ def fetch_live_data(symbol, timeframe, api_key, api_provider):
 
 
 def calculate_indicators(df, rsi_period, ema_fast, ema_slow):
-    """Calculate technical indicators"""
+    """Calculate technical indicators with advanced volume analysis"""
     # RSI
     delta = df['close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=rsi_period).mean()
@@ -293,26 +293,155 @@ def calculate_indicators(df, rsi_period, ema_fast, ema_slow):
     df['ema_fast'] = df['close'].ewm(span=ema_fast, adjust=False).mean()
     df['ema_slow'] = df['close'].ewm(span=ema_slow, adjust=False).mean()
     
-    # Volume analysis
+    # Basic volume analysis
     df['vol_ma'] = df['volume'].rolling(window=20).mean()
     df['vol_ratio'] = df['volume'] / df['vol_ma']
     
-    # VWAP
+    # VWAP (Volume Weighted Average Price)
     df['vwap'] = (df['volume'] * (df['high'] + df['low'] + df['close']) / 3).cumsum() / df['volume'].cumsum()
     
     # Price momentum
     df['momentum'] = df['close'].pct_change(periods=5) * 100
     
+    # === ADVANCED VOLUME INDICATORS ===
+    
+    # 1. Volume Price Trend (VPT) - Tracks cumulative volume based on price direction
+    df['vpt'] = (df['volume'] * ((df['close'] - df['close'].shift(1)) / df['close'].shift(1))).cumsum()
+    
+    # 2. Money Flow Index (MFI) - Volume-weighted RSI
+    typical_price = (df['high'] + df['low'] + df['close']) / 3
+    money_flow = typical_price * df['volume']
+    
+    positive_flow = money_flow.where(typical_price > typical_price.shift(1), 0).rolling(window=14).sum()
+    negative_flow = money_flow.where(typical_price < typical_price.shift(1), 0).rolling(window=14).sum()
+    
+    money_ratio = positive_flow / negative_flow
+    df['mfi'] = 100 - (100 / (1 + money_ratio))
+    
+    # 3. On-Balance Volume (OBV) - Cumulative volume indicator
+    obv = []
+    obv_value = 0
+    for i in range(len(df)):
+        if i == 0:
+            obv.append(df['volume'].iloc[i])
+        else:
+            if df['close'].iloc[i] > df['close'].iloc[i-1]:
+                obv_value += df['volume'].iloc[i]
+            elif df['close'].iloc[i] < df['close'].iloc[i-1]:
+                obv_value -= df['volume'].iloc[i]
+            obv.append(obv_value)
+    df['obv'] = obv
+    df['obv_ma'] = df['obv'].rolling(window=20).mean()
+    
+    # 4. Volume Spike Detection (Institutional Activity)
+    df['vol_std'] = df['volume'].rolling(window=20).std()
+    df['vol_zscore'] = (df['volume'] - df['vol_ma']) / df['vol_std']
+    
+    # 5. Accumulation/Distribution Line (A/D Line)
+    mfm = ((df['close'] - df['low']) - (df['high'] - df['close'])) / (df['high'] - df['low'])
+    mfm = mfm.fillna(0)  # Handle division by zero
+    mfv = mfm * df['volume']
+    df['ad_line'] = mfv.cumsum()
+    df['ad_line_ma'] = df['ad_line'].rolling(window=20).mean()
+    
+    # 6. Chaikin Money Flow (CMF) - Measures buying/selling pressure
+    df['cmf'] = mfv.rolling(window=20).sum() / df['volume'].rolling(window=20).sum()
+    
+    # 7. Volume-Weighted Moving Average (VWMA)
+    df['vwma'] = (df['close'] * df['volume']).rolling(window=20).sum() / df['volume'].rolling(window=20).sum()
+    
+    # 8. Institutional Order Detection
+    # Large candles + high volume = potential institutional activity
+    df['candle_size'] = abs(df['close'] - df['open']) / df['open'] * 100
+    df['is_large_candle'] = df['candle_size'] > df['candle_size'].rolling(window=20).mean() * 1.5
+    df['institutional_buy'] = (df['vol_zscore'] > 2) & (df['close'] > df['open']) & df['is_large_candle']
+    df['institutional_sell'] = (df['vol_zscore'] > 2) & (df['close'] < df['open']) & df['is_large_candle']
+    
+    # 9. Smart Money Index (SMI) - Tracks opening vs closing activity
+    # Smart money buys at open, sells at close
+    intraday_move = df['close'] - df['open']
+    df['smi'] = intraday_move.cumsum()
+    df['smi_ma'] = df['smi'].rolling(window=20).mean()
+    
     return df
 
 
 def generate_signals(df, rsi_oversold, rsi_overbought):
-    """Generate advanced buy/sell signals"""
+    """Generate advanced buy/sell signals with institutional detection"""
     latest = df.iloc[-1]
     prev = df.iloc[-2]
     
     signals = []
-    signal_strength = 0  # Track signal strength
+    signal_strength = 0
+    institutional_signals = []
+    
+    # === INSTITUTIONAL ORDER DETECTION ===
+    
+    # 1. Extreme Volume Spike (Z-score > 3) - BIG PLAYERS
+    if latest['vol_zscore'] > 3:
+        if latest['close'] > latest['open']:
+            institutional_signals.append("🐋 WHALE BUY DETECTED! (Volume Spike 3σ)")
+            signal_strength += 3
+        else:
+            institutional_signals.append("🐋 WHALE SELL DETECTED! (Volume Spike 3σ)")
+            signal_strength -= 3
+    elif latest['vol_zscore'] > 2:
+        if latest['close'] > latest['open']:
+            institutional_signals.append("🏦 INSTITUTIONAL BUYING (Volume Spike 2σ)")
+            signal_strength += 2
+        else:
+            institutional_signals.append("🏦 INSTITUTIONAL SELLING (Volume Spike 2σ)")
+            signal_strength -= 2
+    
+    # 2. Money Flow Index (MFI) - Volume-based momentum
+    if latest['mfi'] < 20:
+        institutional_signals.append("💰 SMART MONEY ACCUMULATING (MFI < 20)")
+        signal_strength += 2
+    elif latest['mfi'] > 80:
+        institutional_signals.append("💰 SMART MONEY DISTRIBUTING (MFI > 80)")
+        signal_strength -= 2
+    
+    # 3. On-Balance Volume (OBV) Divergence
+    if latest['obv'] > latest['obv_ma'] * 1.1:
+        institutional_signals.append("📊 STRONG ACCUMULATION (OBV Rising)")
+        signal_strength += 1.5
+    elif latest['obv'] < latest['obv_ma'] * 0.9:
+        institutional_signals.append("📊 STRONG DISTRIBUTION (OBV Falling)")
+        signal_strength -= 1.5
+    
+    # 4. Chaikin Money Flow (CMF) - Buying/Selling Pressure
+    if latest['cmf'] > 0.2:
+        institutional_signals.append("🔥 STRONG BUYING PRESSURE (CMF > 0.2)")
+        signal_strength += 1.5
+    elif latest['cmf'] < -0.2:
+        institutional_signals.append("❄️ STRONG SELLING PRESSURE (CMF < -0.2)")
+        signal_strength -= 1.5
+    
+    # 5. Accumulation/Distribution Line Divergence
+    if latest['ad_line'] > latest['ad_line_ma'] * 1.05:
+        institutional_signals.append("🏗️ ACCUMULATION PHASE (A/D Rising)")
+        signal_strength += 1
+    elif latest['ad_line'] < latest['ad_line_ma'] * 0.95:
+        institutional_signals.append("🏚️ DISTRIBUTION PHASE (A/D Falling)")
+        signal_strength -= 1
+    
+    # 6. Smart Money Index
+    if latest['smi'] > latest['smi_ma']:
+        institutional_signals.append("🧠 SMART MONEY BULLISH (SMI Up)")
+        signal_strength += 1
+    elif latest['smi'] < latest['smi_ma']:
+        institutional_signals.append("🧠 SMART MONEY BEARISH (SMI Down)")
+        signal_strength -= 1
+    
+    # 7. Direct Institutional Order Detection
+    if latest['institutional_buy']:
+        institutional_signals.append("🚨 INSTITUTIONAL BUY ORDER DETECTED!")
+        signal_strength += 4
+    elif latest['institutional_sell']:
+        institutional_signals.append("🚨 INSTITUTIONAL SELL ORDER DETECTED!")
+        signal_strength -= 4
+    
+    # === STANDARD TECHNICAL SIGNALS ===
     
     # EMA Crossover (Weight: 3)
     if latest['ema_fast'] > latest['ema_slow'] and prev['ema_fast'] <= prev['ema_slow']:
@@ -330,40 +459,51 @@ def generate_signals(df, rsi_oversold, rsi_overbought):
         signals.append(f"🔴 RSI Overbought ({latest['rsi']:.1f})")
         signal_strength -= 2
     
-    # Volume spike (Weight: 1)
-    if latest['vol_ratio'] > 1.5:
+    # Enhanced Volume Analysis
+    if latest['vol_ratio'] > 2:
+        signals.append(f"📊 MASSIVE VOLUME ({latest['vol_ratio']:.2f}x) - Big Players Active!")
+        signal_strength += 2
+    elif latest['vol_ratio'] > 1.5:
         signals.append(f"📊 High Volume ({latest['vol_ratio']:.2f}x)")
         signal_strength += 1
     
     # Price vs VWAP (Weight: 1)
-    if latest['close'] > latest['vwap']:
-        signals.append("📈 Price Above VWAP")
-        signal_strength += 0.5
-    else:
-        signals.append("📉 Price Below VWAP")
-        signal_strength -= 0.5
+    if latest['close'] > latest['vwap'] * 1.01:
+        signals.append("📈 Price Above VWAP (Bullish)")
+        signal_strength += 1
+    elif latest['close'] < latest['vwap'] * 0.99:
+        signals.append("📉 Price Below VWAP (Bearish)")
+        signal_strength -= 1
     
-    # Momentum (Weight: 1)
-    if latest['momentum'] > 1:
+    # Price vs VWMA
+    if latest['close'] > latest['vwma']:
+        signals.append("💹 Above Volume-Weighted MA")
+        signal_strength += 0.5
+    
+    # Momentum
+    if latest['momentum'] > 2:
         signals.append(f"🚀 Strong Upward Momentum (+{latest['momentum']:.2f}%)")
         signal_strength += 1
-    elif latest['momentum'] < -1:
+    elif latest['momentum'] < -2:
         signals.append(f"⚠️ Strong Downward Momentum ({latest['momentum']:.2f}%)")
         signal_strength -= 1
     
     # Determine overall signal
-    if signal_strength >= 4:
+    if signal_strength >= 6:
         signal_type = "STRONG BUY"
-    elif signal_strength >= 2:
+    elif signal_strength >= 3:
         signal_type = "BUY"
-    elif signal_strength <= -4:
+    elif signal_strength <= -6:
         signal_type = "STRONG SELL"
-    elif signal_strength <= -2:
+    elif signal_strength <= -3:
         signal_type = "SELL"
     else:
         signal_type = "NEUTRAL"
     
-    return signal_type, signals, latest, signal_strength
+    # Combine all signals
+    all_signals = institutional_signals + signals
+    
+    return signal_type, all_signals, latest, signal_strength, institutional_signals
 
 
 def create_advanced_chart(df, ema_fast, ema_slow, rsi_oversold, rsi_overbought, symbol, timeframe):
@@ -744,7 +884,7 @@ df = fetch_live_data(symbol, timeframe, api_key, api_provider)
 
 if df is not None and len(df) > 0:
     df = calculate_indicators(df, rsi_period, ema_fast, ema_slow)
-    signal_type, signals, latest, signal_strength = generate_signals(df, rsi_oversold, rsi_overbought)
+    signal_type, all_signals, latest, signal_strength, institutional_signals = generate_signals(df, rsi_oversold, rsi_overbought)
     
     # Play alert sound and show voice notification
     play_alert_sound(signal_type)
@@ -756,7 +896,7 @@ if df is not None and len(df) > 0:
     
     with col1:
         signal_class = f"signal-{signal_type.lower().replace(' ', '-')}"
-        st.markdown(f'<div class="{signal_class}">🎯 {signal_type}<br/>Strength: {signal_strength}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="{signal_class}">🎯 {signal_type}<br/>Strength: {signal_strength:.1f}</div>', unsafe_allow_html=True)
     
     with col2:
         change_pct = ((latest['close'] - df.iloc[-2]['close']) / df.iloc[-2]['close'] * 100)
@@ -767,17 +907,50 @@ if df is not None and len(df) > 0:
         st.metric("RSI", f"{rsi_color} {latest['rsi']:.1f}")
     
     with col4:
-        ema_status = "📈 Bullish" if latest['ema_fast'] > latest['ema_slow'] else "📉 Bearish"
-        st.metric("EMA Status", ema_status)
+        # MFI indicator
+        mfi_color = "🟢" if latest['mfi'] < 30 else ("🔴" if latest['mfi'] > 70 else "🟡")
+        st.metric("MFI (Money Flow)", f"{mfi_color} {latest['mfi']:.1f}")
     
     with col5:
-        vol_color = "🔥" if latest['vol_ratio'] > 1.5 else "📊"
+        vol_color = "🔥" if latest['vol_ratio'] > 2 else ("📊" if latest['vol_ratio'] > 1.5 else "📉")
         st.metric("Volume", f"{vol_color} {latest['vol_ratio']:.2f}x")
     
+    # === INSTITUTIONAL ACTIVITY ALERTS ===
+    if institutional_signals:
+        st.markdown("---")
+        st.markdown("""
+        <div style='background: linear-gradient(135deg, #ff6b6b 0%, #feca57 100%); 
+                    padding: 20px; 
+                    border-radius: 15px; 
+                    border: 3px solid #ff0000;
+                    animation: glow 2s infinite;
+                    margin: 20px 0;'>
+            <div style='font-size: 28px; font-weight: bold; color: white; text-align: center;'>
+                🏦 INSTITUTIONAL ACTIVITY DETECTED 🏦
+            </div>
+            <div style='font-size: 16px; color: white; text-align: center; margin-top: 10px;'>
+                BIG PLAYERS (CENTRAL BANKS, HEDGE FUNDS, WHALES) ARE ACTIVE!
+            </div>
+        </div>
+        <style>
+        @keyframes glow {
+            0%, 100% { box-shadow: 0 0 20px #ff6b6b; }
+            50% { box-shadow: 0 0 40px #feca57, 0 0 60px #ff6b6b; }
+        }
+        </style>
+        """, unsafe_allow_html=True)
+        
+        st.markdown("### 🐋 WHALE & INSTITUTIONAL SIGNALS:")
+        inst_cols = st.columns(2)
+        for idx, signal in enumerate(institutional_signals):
+            with inst_cols[idx % 2]:
+                st.markdown(f"**{signal}**")
+    
     # Active signals
-    st.markdown("### 🎯 Active Trading Signals")
+    st.markdown("---")
+    st.markdown("### 🎯 All Active Trading Signals")
     cols = st.columns(3)
-    for idx, signal in enumerate(signals):
+    for idx, signal in enumerate(all_signals):
         with cols[idx % 3]:
             st.markdown(f"**{signal}**")
     
@@ -829,16 +1002,16 @@ if df is not None and len(df) > 0:
     # Chart
     st.plotly_chart(create_advanced_chart(df, ema_fast, ema_slow, rsi_oversold, rsi_overbought, symbol, timeframe), use_container_width=True)
     
-    # Market metrics
+    # Market metrics with institutional indicators
     st.markdown("---")
-    st.markdown("### 📊 Market Statistics")
+    st.markdown("### 📊 Market Statistics & Institutional Metrics")
     
     col1, col2, col3, col4, col5, col6 = st.columns(6)
     
     with col1:
-        st.metric("High", f"${df['high'].max():.2f}")
+        st.metric("24h High", f"${df['high'].max():.2f}")
     with col2:
-        st.metric("Low", f"${df['low'].min():.2f}")
+        st.metric("24h Low", f"${df['low'].min():.2f}")
     with col3:
         volatility = ((df['high'] - df['low']) / df['close'] * 100).mean()
         st.metric("Volatility", f"{volatility:.2f}%")
@@ -849,12 +1022,44 @@ if df is not None and len(df) > 0:
     with col6:
         st.metric("Momentum", f"{latest['momentum']:.2f}%")
     
-    # Recent data table
-    with st.expander("📋 Recent Price Action (Last 10 Candles)"):
-        display_df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume', 'rsi', 'ema_fast', 'ema_slow']].tail(10).iloc[::-1]
+    # Institutional metrics row
+    st.markdown("#### 🏦 Institutional Indicators")
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
+    
+    with col1:
+        cmf_status = "🟢 Buying" if latest['cmf'] > 0 else "🔴 Selling"
+        st.metric("Chaikin MF", f"{cmf_status}", f"{latest['cmf']:.3f}")
+    with col2:
+        obv_trend = "📈" if latest['obv'] > latest['obv_ma'] else "📉"
+        st.metric("OBV Trend", obv_trend)
+    with col3:
+        ad_trend = "📈 Accumulation" if latest['ad_line'] > latest['ad_line_ma'] else "📉 Distribution"
+        st.metric("A/D Line", ad_trend)
+    with col4:
+        smi_status = "🧠 Bullish" if latest['smi'] > latest['smi_ma'] else "🧠 Bearish"
+        st.metric("Smart Money", smi_status)
+    with col5:
+        vol_zscore_status = "🐋 WHALE!" if abs(latest['vol_zscore']) > 3 else ("🏦 High" if abs(latest['vol_zscore']) > 2 else "📊 Normal")
+        st.metric("Volume Z-Score", vol_zscore_status, f"{latest['vol_zscore']:.2f}σ")
+    with col6:
+        institutional_count = sum([latest['institutional_buy'], latest['institutional_sell']])
+        inst_status = "🚨 ACTIVE!" if institutional_count > 0 else "😴 Quiet"
+        st.metric("Institutional Orders", inst_status)
+    
+    # Recent data table with institutional indicators
+    with st.expander("📋 Recent Price Action & Institutional Activity (Last 10 Candles)"):
+        display_df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume', 'rsi', 'mfi', 'cmf', 'vol_zscore', 'institutional_buy', 'institutional_sell']].tail(10).iloc[::-1]
         display_df['rsi'] = display_df['rsi'].round(1)
-        display_df['ema_fast'] = display_df['ema_fast'].round(2)
-        display_df['ema_slow'] = display_df['ema_slow'].round(2)
+        display_df['mfi'] = display_df['mfi'].round(1)
+        display_df['cmf'] = display_df['cmf'].round(3)
+        display_df['vol_zscore'] = display_df['vol_zscore'].round(2)
+        display_df['volume'] = (display_df['volume'] / 1e6).round(2)
+        display_df = display_df.rename(columns={
+            'volume': 'Vol (M)',
+            'vol_zscore': 'Vol Z-Score',
+            'institutional_buy': 'Inst Buy 🐋',
+            'institutional_sell': 'Inst Sell 🐋'
+        })
         st.dataframe(display_df, use_container_width=True)
 
 else:
