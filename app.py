@@ -207,36 +207,6 @@ with st.sidebar:
         st.markdown("**RSI Levels**")
         rsi_oversold = st.slider("Oversold Level", 20, 40, preset["rsi_oversold"])
         rsi_overbought = st.slider("Overbought Level", 60, 80, preset["rsi_overbought"])
-        
-        st.markdown("**Volume Sensitivity**")
-        whale_threshold = st.slider("Whale Detection (σ)", 2.0, 4.0, 3.0, 0.5)
-        inst_threshold = st.slider("Institutional Detection (σ)", 1.5, 3.0, 2.0, 0.5)
-    
-    st.markdown("---")
-    
-    # NEW: Price Alerts
-    with st.expander("🔔 Price Alerts", expanded=False):
-        st.markdown("**Set Price Alert Levels**")
-        enable_alerts = st.checkbox("Enable Price Alerts")
-        if enable_alerts:
-            col1, col2 = st.columns(2)
-            with col1:
-                alert_high = st.number_input("Alert Above ($)", min_value=0.0, value=0.0, step=1.0)
-            with col2:
-                alert_low = st.number_input("Alert Below ($)", min_value=0.0, value=0.0, step=1.0)
-    
-    # NEW: Multi-timeframe Analysis
-    with st.expander("📊 Multi-Timeframe View", expanded=False):
-        enable_mtf = st.checkbox("Enable Multi-Timeframe Analysis")
-        if enable_mtf:
-            st.info("Show 5min, 15min, 1hour trend alignment")
-    
-    # NEW: Trade Journal
-    with st.expander("📝 Trade Journal", expanded=False):
-        st.markdown("**Quick Trade Notes**")
-        trade_note = st.text_area("Entry/Exit Notes", height=100)
-        if st.button("💾 Save Trade Note"):
-            st.success("Note saved locally!")
     
     st.markdown("---")
     
@@ -310,134 +280,7 @@ def fetch_live_data(symbol, timeframe, api_key, api_provider):
         return df
 
 
-def calculate_support_resistance(df, window=10):
-    """Calculate dynamic support and resistance levels"""
-    # Recent highs and lows
-    recent_highs = df['high'].rolling(window=window).max()
-    recent_lows = df['low'].rolling(window=window).min()
-    
-    # Pivot points (traditional)
-    pivot = (df['high'] + df['low'] + df['close']) / 3
-    r1 = 2 * pivot - df['low']
-    s1 = 2 * pivot - df['high']
-    r2 = pivot + (df['high'] - df['low'])
-    s2 = pivot - (df['high'] - df['low'])
-    
-    return {
-        'resistance_1': recent_highs.iloc[-1],
-        'support_1': recent_lows.iloc[-1],
-        'pivot': pivot.iloc[-1],
-        'r1': r1.iloc[-1],
-        's1': s1.iloc[-1],
-        'r2': r2.iloc[-1],
-        's2': s2.iloc[-1]
-    }
-
-
-def calculate_fibonacci_levels(df):
-    """Calculate Fibonacci retracement levels"""
-    high = df['high'].max()
-    low = df['low'].min()
-    diff = high - low
-    
-    return {
-        'fib_0': low,
-        'fib_236': low + 0.236 * diff,
-        'fib_382': low + 0.382 * diff,
-        'fib_50': low + 0.5 * diff,
-        'fib_618': low + 0.618 * diff,
-        'fib_786': low + 0.786 * diff,
-        'fib_100': high
-    }
-
-
-def detect_chart_patterns(df):
-    """Detect common chart patterns"""
-    patterns = []
-    latest = df.iloc[-1]
-    prev = df.iloc[-2]
-    prev2 = df.iloc[-3]
-    
-    # Bullish Engulfing
-    if (prev['close'] < prev['open'] and  # Previous was bearish
-        latest['close'] > latest['open'] and  # Current is bullish
-        latest['open'] < prev['close'] and  # Opens below previous close
-        latest['close'] > prev['open']):  # Closes above previous open
-        patterns.append("🟢 Bullish Engulfing Pattern")
-    
-    # Bearish Engulfing
-    if (prev['close'] > prev['open'] and  # Previous was bullish
-        latest['close'] < latest['open'] and  # Current is bearish
-        latest['open'] > prev['close'] and  # Opens above previous close
-        latest['close'] < prev['open']):  # Closes below previous open
-        patterns.append("🔴 Bearish Engulfing Pattern")
-    
-    # Doji
-    body_size = abs(latest['close'] - latest['open'])
-    candle_range = latest['high'] - latest['low']
-    if candle_range > 0 and body_size / candle_range < 0.1:
-        patterns.append("⭐ Doji - Indecision")
-    
-    # Hammer (Bullish reversal)
-    if (latest['close'] > latest['open'] and
-        (latest['high'] - latest['close']) < body_size * 0.3 and
-        (latest['open'] - latest['low']) > body_size * 2):
-        patterns.append("🔨 Hammer - Bullish Reversal")
-    
-    # Shooting Star (Bearish reversal)
-    if (latest['close'] < latest['open'] and
-        (latest['close'] - latest['low']) < body_size * 0.3 and
-        (latest['high'] - latest['open']) > body_size * 2):
-        patterns.append("💫 Shooting Star - Bearish Reversal")
-    
-    # Three White Soldiers (Strong Bullish)
-    if (df.iloc[-3]['close'] > df.iloc[-3]['open'] and
-        df.iloc[-2]['close'] > df.iloc[-2]['open'] and
-        latest['close'] > latest['open'] and
-        df.iloc[-2]['close'] > df.iloc[-3]['close'] and
-        latest['close'] > df.iloc[-2]['close']):
-        patterns.append("⚔️ Three White Soldiers - Strong Bullish")
-    
-    # Three Black Crows (Strong Bearish)
-    if (df.iloc[-3]['close'] < df.iloc[-3]['open'] and
-        df.iloc[-2]['close'] < df.iloc[-2]['open'] and
-        latest['close'] < latest['open'] and
-        df.iloc[-2]['close'] < df.iloc[-3]['close'] and
-        latest['close'] < df.iloc[-2]['close']):
-        patterns.append("🐦 Three Black Crows - Strong Bearish")
-    
-    return patterns
-
-
-def calculate_trend_strength(df):
-    """Calculate ADX (Average Directional Index) for trend strength"""
-    high = df['high']
-    low = df['low']
-    close = df['close']
-    
-    # Calculate +DM and -DM
-    plus_dm = high.diff()
-    minus_dm = -low.diff()
-    
-    plus_dm[plus_dm < 0] = 0
-    minus_dm[minus_dm < 0] = 0
-    
-    # True Range
-    tr1 = high - low
-    tr2 = abs(high - close.shift())
-    tr3 = abs(low - close.shift())
-    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-    
-    # Smooth with 14-period average
-    atr = tr.rolling(window=14).mean()
-    plus_di = 100 * (plus_dm.rolling(window=14).mean() / atr)
-    minus_di = 100 * (minus_dm.rolling(window=14).mean() / atr)
-    
-    # Calculate ADX
-    dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di)
-    adx = dx.rolling(window=14).mean()
-    
-    return adx.iloc[-1] if not adx.empty else 0
+def calculate_indicators(df, rsi_period, ema_fast, ema_slow):
     """Calculate technical indicators with advanced volume analysis"""
     # RSI
     delta = df['close'].diff()
@@ -1043,19 +886,6 @@ if df is not None and len(df) > 0:
     df = calculate_indicators(df, rsi_period, ema_fast, ema_slow)
     signal_type, all_signals, latest, signal_strength, institutional_signals = generate_signals(df, rsi_oversold, rsi_overbought)
     
-    # Calculate new features
-    support_resistance = calculate_support_resistance(df)
-    fib_levels = calculate_fibonacci_levels(df)
-    chart_patterns = detect_chart_patterns(df)
-    trend_strength = calculate_trend_strength(df)
-    
-    # Check price alerts
-    if 'enable_alerts' in locals() and enable_alerts:
-        if alert_high > 0 and latest['close'] >= alert_high:
-            st.error(f"🔔 PRICE ALERT! Price reached ${latest['close']:.2f} (Above ${alert_high:.2f})")
-        if alert_low > 0 and latest['close'] <= alert_low:
-            st.error(f"🔔 PRICE ALERT! Price reached ${latest['close']:.2f} (Below ${alert_low:.2f})")
-    
     # Play alert sound and show voice notification
     play_alert_sound(signal_type)
     
@@ -1084,108 +914,6 @@ if df is not None and len(df) > 0:
     with col5:
         vol_color = "🔥" if latest['vol_ratio'] > 2 else ("📊" if latest['vol_ratio'] > 1.5 else "📉")
         st.metric("Volume", f"{vol_color} {latest['vol_ratio']:.2f}x")
-    
-    # === CHART PATTERNS & TREND ANALYSIS ===
-    if chart_patterns:
-        st.markdown("---")
-        st.markdown("""
-        <div style='background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-                    padding: 15px; 
-                    border-radius: 10px; 
-                    margin: 10px 0;'>
-            <div style='font-size: 22px; font-weight: bold; color: white; text-align: center;'>
-                📊 CHART PATTERNS DETECTED 📊
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        pattern_cols = st.columns(len(chart_patterns))
-        for idx, pattern in enumerate(chart_patterns):
-            with pattern_cols[idx]:
-                st.markdown(f"**{pattern}**")
-    
-    # === TREND STRENGTH INDICATOR ===
-    st.markdown("---")
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        if trend_strength > 50:
-            trend_status = "💪 VERY STRONG TREND"
-            trend_color = "#00ff00"
-        elif trend_strength > 25:
-            trend_status = "📈 STRONG TREND"
-            trend_color = "#90EE90"
-        elif trend_strength > 20:
-            trend_status = "📊 MODERATE TREND"
-            trend_color = "#ffa500"
-        else:
-            trend_status = "😴 WEAK/NO TREND"
-            trend_color = "#ff6b6b"
-        
-        st.markdown(f"""
-        <div style='background: linear-gradient(135deg, {trend_color} 0%, {trend_color}99 100%); 
-                    padding: 15px; 
-                    border-radius: 10px; 
-                    text-align: center;'>
-            <div style='font-size: 20px; font-weight: bold; color: black;'>
-                Trend Strength (ADX): {trend_strength:.1f}
-            </div>
-            <div style='font-size: 18px; color: black;'>
-                {trend_status}
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    # === SUPPORT & RESISTANCE LEVELS ===
-    st.markdown("---")
-    st.markdown("### 🎯 Support & Resistance Levels")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.markdown("**🔴 Resistance Levels**")
-        st.metric("R2 (Strong)", f"${support_resistance['r2']:.2f}")
-        st.metric("R1 (Pivot)", f"${support_resistance['r1']:.2f}")
-        st.metric("Recent High", f"${support_resistance['resistance_1']:.2f}")
-    
-    with col2:
-        st.markdown("**⚖️ Pivot & Current**")
-        st.metric("Pivot Point", f"${support_resistance['pivot']:.2f}")
-        distance_from_pivot = ((latest['close'] - support_resistance['pivot']) / support_resistance['pivot'] * 100)
-        st.metric("Current Price", f"${latest['close']:.2f}", f"{distance_from_pivot:+.2f}% from pivot")
-    
-    with col3:
-        st.markdown("**🟢 Support Levels**")
-        st.metric("Recent Low", f"${support_resistance['support_1']:.2f}")
-        st.metric("S1 (Pivot)", f"${support_resistance['s1']:.2f}")
-        st.metric("S2 (Strong)", f"${support_resistance['s2']:.2f}")
-    
-    # === FIBONACCI LEVELS ===
-    with st.expander("📐 Fibonacci Retracement Levels", expanded=False):
-        fib_col1, fib_col2 = st.columns(2)
-        
-        with fib_col1:
-            st.metric("100% (High)", f"${fib_levels['fib_100']:.2f}")
-            st.metric("78.6%", f"${fib_levels['fib_786']:.2f}")
-            st.metric("61.8% (Golden)", f"${fib_levels['fib_618']:.2f}")
-            st.metric("50%", f"${fib_levels['fib_50']:.2f}")
-        
-        with fib_col2:
-            st.metric("38.2%", f"${fib_levels['fib_382']:.2f}")
-            st.metric("23.6%", f"${fib_levels['fib_236']:.2f}")
-            st.metric("0% (Low)", f"${fib_levels['fib_0']:.2f}")
-            
-            # Find closest Fib level
-            fib_dists = {
-                '0%': abs(latest['close'] - fib_levels['fib_0']),
-                '23.6%': abs(latest['close'] - fib_levels['fib_236']),
-                '38.2%': abs(latest['close'] - fib_levels['fib_382']),
-                '50%': abs(latest['close'] - fib_levels['fib_50']),
-                '61.8%': abs(latest['close'] - fib_levels['fib_618']),
-                '78.6%': abs(latest['close'] - fib_levels['fib_786']),
-                '100%': abs(latest['close'] - fib_levels['fib_100'])
-            }
-            closest_fib = min(fib_dists, key=fib_dists.get)
-            st.info(f"📍 Closest to {closest_fib} Fibonacci level")
     
     # === INSTITUTIONAL ACTIVITY ALERTS ===
     if institutional_signals:
@@ -1226,108 +954,50 @@ if df is not None and len(df) > 0:
         with cols[idx % 3]:
             st.markdown(f"**{signal}**")
     
-    # Trading recommendation with position sizing
+    # Trading recommendation
     st.markdown("---")
-    st.markdown("### 💡 Trading Recommendation & Position Sizing")
+    st.markdown("### 💡 Trading Recommendation")
     
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        if "STRONG BUY" in signal_type:
-            stop_loss = latest['close'] * 0.98
-            target1 = latest['close'] * 1.02
-            target2 = latest['close'] * 1.04
-            risk_reward = 2.0
-            
-            st.success(f"""
-            **🟢 STRONG BUY SIGNAL DETECTED!**
-            
-            - Entry: ${latest['close']:.2f}
-            - Stop Loss: ${stop_loss:.2f} (-2%)
-            - Target 1: ${target1:.2f} (+2%)
-            - Target 2: ${target2:.2f} (+4%)
-            
-            Risk/Reward: 1:{risk_reward}
-            
-            **Key Levels:**
-            - Support: ${support_resistance['s1']:.2f}
-            - Resistance: ${support_resistance['r1']:.2f}
-            """)
-        elif "BUY" in signal_type:
-            stop_loss = latest['close'] * 0.985
-            target = latest['close'] * 1.03
-            
-            st.success(f"""
-            **🟢 BUY SIGNAL**
-            
-            - Entry: ${latest['close']:.2f}
-            - Stop Loss: ${stop_loss:.2f} (-1.5%)
-            - Target: ${target:.2f} (+3%)
-            
-            **Key Levels:**
-            - Support: ${support_resistance['s1']:.2f}
-            - Resistance: ${support_resistance['r1']:.2f}
-            """)
-        elif "STRONG SELL" in signal_type:
-            stop_loss = latest['close'] * 1.02
-            target1 = latest['close'] * 0.98
-            target2 = latest['close'] * 0.96
-            risk_reward = 2.0
-            
-            st.error(f"""
-            **🔴 STRONG SELL SIGNAL DETECTED!**
-            
-            - Entry: ${latest['close']:.2f}
-            - Stop Loss: ${stop_loss:.2f} (+2%)
-            - Target 1: ${target1:.2f} (-2%)
-            - Target 2: ${target2:.2f} (-4%)
-            
-            Risk/Reward: 1:{risk_reward}
-            
-            **Key Levels:**
-            - Resistance: ${support_resistance['r1']:.2f}
-            - Support: ${support_resistance['s1']:.2f}
-            """)
-        elif "SELL" in signal_type:
-            stop_loss = latest['close'] * 1.015
-            target = latest['close'] * 0.97
-            
-            st.error(f"""
-            **🔴 SELL SIGNAL**
-            
-            - Entry: ${latest['close']:.2f}
-            - Stop Loss: ${stop_loss:.2f} (+1.5%)
-            - Target: ${target:.2f} (-3%)
-            
-            **Key Levels:**
-            - Resistance: ${support_resistance['r1']:.2f}
-            - Support: ${support_resistance['s1']:.2f}
-            """)
-        else:
-            st.info("⚪ **NEUTRAL** - Wait for clearer signals. Avoid trading in sideways markets.")
-    
-    with col2:
-        st.markdown("#### 💰 Position Size Calculator")
-        account_size = st.number_input("Account Size ($)", min_value=100.0, value=10000.0, step=100.0)
-        risk_percent = st.slider("Risk per Trade (%)", 0.5, 5.0, 2.0, 0.5)
+    if "STRONG BUY" in signal_type:
+        st.success(f"""
+        **🟢 STRONG BUY SIGNAL DETECTED!**
         
-        risk_amount = account_size * (risk_percent / 100)
+        - Entry: ${latest['close']:.2f}
+        - Stop Loss: ${latest['close'] * 0.98:.2f} (-2%)
+        - Target 1: ${latest['close'] * 1.02:.2f} (+2%)
+        - Target 2: ${latest['close'] * 1.04:.2f} (+4%)
         
-        if signal_type != "NEUTRAL":
-            if "BUY" in signal_type:
-                stop_distance = abs(latest['close'] - (latest['close'] * 0.98))
-            else:
-                stop_distance = abs(latest['close'] - (latest['close'] * 1.02))
-            
-            if stop_distance > 0:
-                position_size = risk_amount / stop_distance
-                units = int(position_size)
-                
-                st.metric("Risk Amount", f"${risk_amount:.2f}")
-                st.metric("Position Size", f"{units} units")
-                st.metric("Total Position", f"${(units * latest['close']):.2f}")
-        else:
-            st.info("Set signal to calculate position size")
+        Risk/Reward: 1:2
+        """)
+    elif "BUY" in signal_type:
+        st.success(f"""
+        **🟢 BUY SIGNAL**
+        
+        - Entry: ${latest['close']:.2f}
+        - Stop Loss: ${latest['close'] * 0.985:.2f} (-1.5%)
+        - Target: ${latest['close'] * 1.03:.2f} (+3%)
+        """)
+    elif "STRONG SELL" in signal_type:
+        st.error(f"""
+        **🔴 STRONG SELL SIGNAL DETECTED!**
+        
+        - Entry: ${latest['close']:.2f}
+        - Stop Loss: ${latest['close'] * 1.02:.2f} (+2%)
+        - Target 1: ${latest['close'] * 0.98:.2f} (-2%)
+        - Target 2: ${latest['close'] * 0.96:.2f} (-4%)
+        
+        Risk/Reward: 1:2
+        """)
+    elif "SELL" in signal_type:
+        st.error(f"""
+        **🔴 SELL SIGNAL**
+        
+        - Entry: ${latest['close']:.2f}
+        - Stop Loss: ${latest['close'] * 1.015:.2f} (+1.5%)
+        - Target: ${latest['close'] * 0.97:.2f} (-3%)
+        """)
+    else:
+        st.info("⚪ **NEUTRAL** - Wait for clearer signals. Avoid trading in sideways markets.")
     
     # Chart
     st.plotly_chart(create_advanced_chart(df, ema_fast, ema_slow, rsi_oversold, rsi_overbought, symbol, timeframe), use_container_width=True)
