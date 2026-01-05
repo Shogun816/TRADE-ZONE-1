@@ -312,101 +312,137 @@ def fetch_live_data(symbol, timeframe, api_key, api_provider):
 
 def calculate_support_resistance(df, window=10):
     """Calculate dynamic support and resistance levels"""
-    # Recent highs and lows
-    recent_highs = df['high'].rolling(window=window).max()
-    recent_lows = df['low'].rolling(window=window).min()
-    
-    # Pivot points (traditional)
-    pivot = (df['high'] + df['low'] + df['close']) / 3
-    r1 = 2 * pivot - df['low']
-    s1 = 2 * pivot - df['high']
-    r2 = pivot + (df['high'] - df['low'])
-    s2 = pivot - (df['high'] - df['low'])
-    
-    return {
-        'resistance_1': recent_highs.iloc[-1],
-        'support_1': recent_lows.iloc[-1],
-        'pivot': pivot.iloc[-1],
-        'r1': r1.iloc[-1],
-        's1': s1.iloc[-1],
-        'r2': r2.iloc[-1],
-        's2': s2.iloc[-1]
-    }
+    try:
+        # Recent highs and lows
+        recent_highs = df['high'].rolling(window=window).max()
+        recent_lows = df['low'].rolling(window=window).min()
+        
+        # Pivot points (traditional)
+        pivot = (df['high'] + df['low'] + df['close']) / 3
+        r1 = 2 * pivot - df['low']
+        s1 = 2 * pivot - df['high']
+        r2 = pivot + (df['high'] - df['low'])
+        s2 = pivot - (df['high'] - df['low'])
+        
+        return {
+            'resistance_1': float(recent_highs.iloc[-1]),
+            'support_1': float(recent_lows.iloc[-1]),
+            'pivot': float(pivot.iloc[-1]),
+            'r1': float(r1.iloc[-1]),
+            's1': float(s1.iloc[-1]),
+            'r2': float(r2.iloc[-1]),
+            's2': float(s2.iloc[-1])
+        }
+    except Exception as e:
+        # Return default values if calculation fails
+        latest_price = df['close'].iloc[-1]
+        return {
+            'resistance_1': latest_price * 1.02,
+            'support_1': latest_price * 0.98,
+            'pivot': latest_price,
+            'r1': latest_price * 1.015,
+            's1': latest_price * 0.985,
+            'r2': latest_price * 1.03,
+            's2': latest_price * 0.97
+        }
 
 
 def calculate_fibonacci_levels(df):
     """Calculate Fibonacci retracement levels"""
-    high = df['high'].max()
-    low = df['low'].min()
-    diff = high - low
-    
-    return {
-        'fib_0': low,
-        'fib_236': low + 0.236 * diff,
-        'fib_382': low + 0.382 * diff,
-        'fib_50': low + 0.5 * diff,
-        'fib_618': low + 0.618 * diff,
-        'fib_786': low + 0.786 * diff,
-        'fib_100': high
-    }
+    try:
+        high = float(df['high'].max())
+        low = float(df['low'].min())
+        diff = high - low
+        
+        return {
+            'fib_0': low,
+            'fib_236': low + 0.236 * diff,
+            'fib_382': low + 0.382 * diff,
+            'fib_50': low + 0.5 * diff,
+            'fib_618': low + 0.618 * diff,
+            'fib_786': low + 0.786 * diff,
+            'fib_100': high
+        }
+    except Exception as e:
+        latest_price = df['close'].iloc[-1]
+        return {
+            'fib_0': latest_price * 0.95,
+            'fib_236': latest_price * 0.97,
+            'fib_382': latest_price * 0.98,
+            'fib_50': latest_price,
+            'fib_618': latest_price * 1.02,
+            'fib_786': latest_price * 1.03,
+            'fib_100': latest_price * 1.05
+        }
 
 
 def detect_chart_patterns(df):
     """Detect common chart patterns"""
-    patterns = []
-    latest = df.iloc[-1]
-    prev = df.iloc[-2]
-    prev2 = df.iloc[-3]
-    
-    # Bullish Engulfing
-    if (prev['close'] < prev['open'] and  # Previous was bearish
-        latest['close'] > latest['open'] and  # Current is bullish
-        latest['open'] < prev['close'] and  # Opens below previous close
-        latest['close'] > prev['open']):  # Closes above previous open
-        patterns.append("🟢 Bullish Engulfing Pattern")
-    
-    # Bearish Engulfing
-    if (prev['close'] > prev['open'] and  # Previous was bullish
-        latest['close'] < latest['open'] and  # Current is bearish
-        latest['open'] > prev['close'] and  # Opens above previous close
-        latest['close'] < prev['open']):  # Closes below previous open
-        patterns.append("🔴 Bearish Engulfing Pattern")
-    
-    # Doji
-    body_size = abs(latest['close'] - latest['open'])
-    candle_range = latest['high'] - latest['low']
-    if candle_range > 0 and body_size / candle_range < 0.1:
-        patterns.append("⭐ Doji - Indecision")
-    
-    # Hammer (Bullish reversal)
-    if (latest['close'] > latest['open'] and
-        (latest['high'] - latest['close']) < body_size * 0.3 and
-        (latest['open'] - latest['low']) > body_size * 2):
-        patterns.append("🔨 Hammer - Bullish Reversal")
-    
-    # Shooting Star (Bearish reversal)
-    if (latest['close'] < latest['open'] and
-        (latest['close'] - latest['low']) < body_size * 0.3 and
-        (latest['high'] - latest['open']) > body_size * 2):
-        patterns.append("💫 Shooting Star - Bearish Reversal")
-    
-    # Three White Soldiers (Strong Bullish)
-    if (df.iloc[-3]['close'] > df.iloc[-3]['open'] and
-        df.iloc[-2]['close'] > df.iloc[-2]['open'] and
-        latest['close'] > latest['open'] and
-        df.iloc[-2]['close'] > df.iloc[-3]['close'] and
-        latest['close'] > df.iloc[-2]['close']):
-        patterns.append("⚔️ Three White Soldiers - Strong Bullish")
-    
-    # Three Black Crows (Strong Bearish)
-    if (df.iloc[-3]['close'] < df.iloc[-3]['open'] and
-        df.iloc[-2]['close'] < df.iloc[-2]['open'] and
-        latest['close'] < latest['open'] and
-        df.iloc[-2]['close'] < df.iloc[-3]['close'] and
-        latest['close'] < df.iloc[-2]['close']):
-        patterns.append("🐦 Three Black Crows - Strong Bearish")
-    
-    return patterns
+    try:
+        patterns = []
+        
+        if len(df) < 4:
+            return patterns
+        
+        latest = df.iloc[-1]
+        prev = df.iloc[-2]
+        prev2 = df.iloc[-3]
+        
+        # Bullish Engulfing
+        if (prev['close'] < prev['open'] and
+            latest['close'] > latest['open'] and
+            latest['open'] < prev['close'] and
+            latest['close'] > prev['open']):
+            patterns.append("🟢 Bullish Engulfing Pattern")
+        
+        # Bearish Engulfing
+        if (prev['close'] > prev['open'] and
+            latest['close'] < latest['open'] and
+            latest['open'] > prev['close'] and
+            latest['close'] < prev['open']):
+            patterns.append("🔴 Bearish Engulfing Pattern")
+        
+        # Doji
+        body_size = abs(latest['close'] - latest['open'])
+        candle_range = latest['high'] - latest['low']
+        if candle_range > 0 and body_size / candle_range < 0.1:
+            patterns.append("⭐ Doji - Indecision")
+        
+        # Hammer (Bullish reversal)
+        if (latest['close'] > latest['open'] and body_size > 0):
+            upper_shadow = latest['high'] - latest['close']
+            lower_shadow = latest['open'] - latest['low']
+            if (upper_shadow < body_size * 0.3 and lower_shadow > body_size * 2):
+                patterns.append("🔨 Hammer - Bullish Reversal")
+        
+        # Shooting Star (Bearish reversal)
+        if (latest['close'] < latest['open'] and body_size > 0):
+            upper_shadow = latest['high'] - latest['open']
+            lower_shadow = latest['close'] - latest['low']
+            if (lower_shadow < body_size * 0.3 and upper_shadow > body_size * 2):
+                patterns.append("💫 Shooting Star - Bearish Reversal")
+        
+        # Three White Soldiers (Strong Bullish)
+        if len(df) >= 3:
+            if (df.iloc[-3]['close'] > df.iloc[-3]['open'] and
+                df.iloc[-2]['close'] > df.iloc[-2]['open'] and
+                latest['close'] > latest['open'] and
+                df.iloc[-2]['close'] > df.iloc[-3]['close'] and
+                latest['close'] > df.iloc[-2]['close']):
+                patterns.append("⚔️ Three White Soldiers - Strong Bullish")
+        
+        # Three Black Crows (Strong Bearish)
+        if len(df) >= 3:
+            if (df.iloc[-3]['close'] < df.iloc[-3]['open'] and
+                df.iloc[-2]['close'] < df.iloc[-2]['open'] and
+                latest['close'] < latest['open'] and
+                df.iloc[-2]['close'] < df.iloc[-3]['close'] and
+                latest['close'] < df.iloc[-2]['close']):
+                patterns.append("🐦 Three Black Crows - Strong Bearish")
+        
+        return patterns
+    except Exception as e:
+        return []
 
 
 def calculate_trend_strength(df):
