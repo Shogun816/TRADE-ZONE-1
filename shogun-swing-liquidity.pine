@@ -1,10 +1,10 @@
 //@version=5
 // ═══════════════════════════════════════════════════════════════════
-//  SHOGUN Swing + Liquidity [v5]
+//  SHOGUN Swing + Liquidity [v6]
 //  Swing highs/lows + un-swept liquidity levels + sweep entry/exit signals
 //  + SHOGUN zone overlay (auto-detected per symbol) with in-zone filter
 //  + ATR-spaced labels + TP-hit / SL-hit alerts + zone style control
-//  + New York / London session shading
+//  + New York / London session shading + estimated volume delta
 //  Usage: paste into TradingView Pine Editor → "Add to chart"
 // ═══════════════════════════════════════════════════════════════════
 indicator("SHOGUN Swing + Liquidity", shorttitle="SHOGUN S+L", overlay=true,
@@ -271,6 +271,23 @@ nearestAbove(float[] prices, float ref) =>
         k += 1
     best
 
+// ─────────── Volume delta (ESTIMATED — Pine has no true bid/ask footprint data) ───────────
+grpV       = "Volume"
+showDelta  = input.bool(true, "Volume delta (est.)", group=grpV,
+     tooltip="Estimated buy/sell volume split per bar from candle range. Shown on LONG/SHORT signals and dashboard.")
+
+fmtVol(float v) =>
+    float av = math.abs(v)
+    string num = av >= 1000000 ? str.tostring(av / 1000000, "#.#") + "M" :
+         av >= 1000 ? str.tostring(av / 1000, "#.#") + "K" :
+         str.tostring(av, "#")
+    (v >= 0 ? "+" : "-") + num
+
+rng     = math.max(high - low, syminfo.mintick)
+buyVolE = volume * (close - low) / rng
+sellVolE = volume * (high - close) / rng
+deltaE  = buyVolE - sellVolE
+
 // ─────────── Entry / SL / TP (zone-filtered) ───────────
 bool longOK  = not filterZone or not zKnown or nearBuyZone(close)
 bool shortOK = not filterZone or not zKnown or nearSellZone(close)
@@ -289,7 +306,8 @@ if bearSweep and showSig and shortOK
     eDir   := "S"
     label.new(bar_index, high + atr * labelOffset,
          "SHORT\nSL " + str.tostring(sweepPx, format.mintick) +
-         (na(eTP) ? "" : "\nTP " + str.tostring(eTP, format.mintick)),
+         (na(eTP) ? "" : "\nTP " + str.tostring(eTP, format.mintick)) +
+         (showDelta ? "\nΔ " + fmtVol(deltaE) : ""),
          style=label.style_label_down, color=color.new(color.red, 0),
          textcolor=color.white, size=size.small)
     if showTP
@@ -310,7 +328,8 @@ if bullSweep and showSig and longOK
     eDir   := "L"
     label.new(bar_index, low - atr * labelOffset,
          "LONG\nSL " + str.tostring(sweepPx, format.mintick) +
-         (na(eTP) ? "" : "\nTP " + str.tostring(eTP, format.mintick)),
+         (na(eTP) ? "" : "\nTP " + str.tostring(eTP, format.mintick)) +
+         (showDelta ? "\nΔ " + fmtVol(deltaE) : ""),
          style=label.style_label_up, color=color.new(color.teal, 0),
          textcolor=color.white, size=size.small)
     if showTP
@@ -358,7 +377,7 @@ else if eDir == "L"
         eDir := na
 
 // ─────────── Dashboard ───────────
-var table dash = table.new(position.top_right, 2, 4, border_width=1,
+var table dash = table.new(position.top_right, 2, 5, border_width=1,
      border_color=color.new(color.gray, 70))
 
 if showDash and barstate.islast
@@ -382,6 +401,10 @@ if showDash and barstate.islast
     table.cell(dash, 0, 3, "SWING L/R",
          text_color=color.white, bgcolor=color.new(color.gray, 25))
     table.cell(dash, 1, 3, str.tostring(leftBars) + "/" + str.tostring(rightBars),
+         text_color=color.white, bgcolor=color.new(color.gray, 25))
+    table.cell(dash, 0, 4, "VOL Δ EST",
+         text_color=color.white, bgcolor=color.new(color.gray, 25))
+    table.cell(dash, 1, 4, fmtVol(deltaE),
          text_color=color.white, bgcolor=color.new(color.gray, 25))
 
 // ─────────── Alerts ───────────
