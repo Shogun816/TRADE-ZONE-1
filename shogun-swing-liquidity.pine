@@ -1,0 +1,352 @@
+//@version=5
+// ═══════════════════════════════════════════════════════════════════
+//  SHOGUN Swing + Liquidity [v2]
+//  Swing highs/lows + un-swept liquidity levels + sweep entry/exit signals
+//  + SHOGUN zone overlay (auto-detected per symbol) with in-zone filter
+//  Usage: paste into TradingView Pine Editor → "Add to chart"
+// ═══════════════════════════════════════════════════════════════════
+indicator("SHOGUN Swing + Liquidity", shorttitle="SHOGUN S+L", overlay=true,
+     max_lines_count=500, max_labels_count=500, max_boxes_count=50)
+
+// ─────────── Inputs ───────────
+grpS      = "Swings"
+leftBars   = input.int(5, "Left bars", minval=1, group=grpS,
+     tooltip="Bars to the left of a swing point")
+rightBars  = input.int(3, "Right bars", minval=1, group=grpS,
+     tooltip="Bars to the right — confirmation delay")
+showSwings = input.bool(true, "Swing labels", group=grpS)
+
+grpL      = "Liquidity"
+showLiq   = input.bool(true, "Liquidity lines", group=grpL)
+maxLevels = input.int(8, "Levels kept per side", minval=1, maxval=20, group=grpL)
+
+grpX    = "Entry / Exit"
+showSig = input.bool(true, "Sweep entry signals", group=grpX)
+showTP  = input.bool(true, "SL / TP lines", group=grpX)
+
+grpZ       = "SHOGUN Zones"
+useZones   = input.bool(true, "Zone overlay", group=grpZ,
+     tooltip="Draw your TradingView buy/sell zones (auto-detected per symbol)")
+filterZone = input.bool(true, "Signals in-zone only", group=grpZ,
+     tooltip="LONG only in/near buy zones, SHORT only in/near sell zones (near = within 2% of a zone edge)")
+
+grpD     = "Dashboard"
+showDash = input.bool(true, "Liquidity dashboard", group=grpD)
+
+// ─────────── Zone table (auto-detect symbol) ───────────
+string _t = syminfo.ticker
+bool zGold   = str.contains(_t, "XAU")
+bool zSilver  = str.contains(_t, "XAG")
+bool zQQQ    = str.contains(_t, "QQQ")
+bool zNVDA   = str.contains(_t, "NVDA")
+bool zNDX    = str.contains(_t, "NDX") or str.contains(_t, "US100") or str.contains(_t, "USTEC")
+bool zKnown  = zGold or zSilver or zQQQ or zNVDA or zNDX
+
+getZones() =>
+    float b1l = na
+    float b1h = na
+    float b2l = na
+    float b2h = na
+    float s1l = na
+    float s1h = na
+    float s2l = na
+    float s2h = na
+    if zGold
+        b1l := 4000.0
+        b1h := 4200.0
+        b2l := 3800.0
+        b2h := 4000.0
+        s1l := 4600.0
+        s1h := 4800.0
+        s2l := 5200.0
+        s2h := 5600.0
+    else if zSilver
+        b1l := 58.0
+        b1h := 62.0
+        b2l := 66.0
+        b2h := 70.0
+        s1l := 70.0
+        s1h := 76.0
+        s2l := 88.0
+        s2h := 96.0
+    else if zQQQ
+        b1l := 650.0
+        b1h := 680.0
+        b2l := 580.0
+        b2h := 610.0
+        s1l := 700.0
+        s1h := 720.0
+        s2l := 740.0
+        s2h := 755.0
+    else if zNVDA
+        b1l := 195.0
+        b1h := 205.0
+        b2l := 160.0
+        b2h := 170.0
+        s1l := 215.0
+        s1h := 222.0
+        s2l := 232.0
+        s2h := 238.0
+    else if zNDX
+        b1l := 27000.0
+        b1h := 28000.0
+        b2l := 22500.0
+        b2h := 23500.0
+        s1l := 29000.0
+        s1h := 29500.0
+        s2l := 30500.0
+        s2h := 31200.0
+    [b1l, b1h, b2l, b2h, s1l, s1h, s2l, s2h]
+
+[b1l, b1h, b2l, b2h, s1l, s1h, s2l, s2h] = getZones()
+
+// In-zone check: inside the zone or within 2% of either edge (your NEAR rule)
+inZone(float price, float lo, float hi) =>
+    not na(lo) and price >= lo * 0.98 and price <= hi * 1.02
+
+nearBuyZone(float price) =>
+    inZone(price, b1l, b1h) or inZone(price, b2l, b2h)
+
+nearSellZone(float price) =>
+    inZone(price, s1l, s1h) or inZone(price, s2l, s2h)
+
+// Draw zone boxes once
+if useZones and zKnown and barstate.isfirst
+    box.new(bar_index, b1h, bar_index + 1, b1l, extend=extend.right,
+         bgcolor=color.new(color.green, 88), border_color=color.new(color.green, 60),
+         text="BUY " + str.tostring(b1l, format.mintick) + "-" + str.tostring(b1h, format.mintick),
+         text_size=size.tiny, text_color=color.new(color.green, 20))
+    box.new(bar_index, b2h, bar_index + 1, b2l, extend=extend.right,
+         bgcolor=color.new(color.green, 88), border_color=color.new(color.green, 60),
+         text="BUY " + str.tostring(b2l, format.mintick) + "-" + str.tostring(b2h, format.mintick),
+         text_size=size.tiny, text_color=color.new(color.green, 20))
+    box.new(bar_index, s1h, bar_index + 1, s1l, extend=extend.right,
+         bgcolor=color.new(color.red, 88), border_color=color.new(color.red, 60),
+         text="SELL " + str.tostring(s1l, format.mintick) + "-" + str.tostring(s1h, format.mintick),
+         text_size=size.tiny, text_color=color.new(color.red, 20))
+    box.new(bar_index, s2h, bar_index + 1, s2l, extend=extend.right,
+         bgcolor=color.new(color.red, 88), border_color=color.new(color.red, 60),
+         text="SELL " + str.tostring(s2l, format.mintick) + "-" + str.tostring(s2h, format.mintick),
+         text_size=size.tiny, text_color=color.new(color.red, 20))
+
+// ─────────── Swing detection (confirmed fractals) ───────────
+ph = ta.pivothigh(high, leftBars, rightBars)
+pl = ta.pivotlow(low, leftBars, rightBars)
+int xH = bar_index - rightBars
+int xL = bar_index - rightBars
+
+// ─────────── Liquidity pools (un-swept swings) ───────────
+var line[]  bslLines  = array.new_line()    // buy-side liquidity (above)
+var float[] bslPrices = array.new_float()
+var line[]  sslLines  = array.new_line()    // sell-side liquidity (below)
+var float[] sslPrices = array.new_float()
+
+addLevel(bool isBuySide, float price, int x) =>
+    if isBuySide
+        l = line.new(x, price, bar_index + 10, price, extend=extend.right,
+             color=color.new(color.red, 15), width=1, style=line.style_dashed)
+        array.push(bslLines, l)
+        array.push(bslPrices, price)
+        if array.size(bslLines) > maxLevels
+            line.delete(array.shift(bslLines))
+            array.shift(bslPrices)
+    else
+        l = line.new(x, price, bar_index + 10, price, extend=extend.right,
+             color=color.new(color.teal, 15), width=1, style=line.style_dashed)
+        array.push(sslLines, l)
+        array.push(sslPrices, price)
+        if array.size(sslLines) > maxLevels
+            line.delete(array.shift(sslLines))
+            array.shift(sslPrices)
+
+dropLevel(line[] lines, float[] prices, int i) =>
+    line.delete(array.get(lines, i))
+    array.remove(lines, i)
+    array.remove(prices, i)
+
+// Register fresh swings — only levels still ahead of price
+if not na(ph) and ph > close
+    addLevel(true, ph, xH)
+    if showSwings
+        label.new(xH, ph, "SH " + str.tostring(ph, format.mintick),
+             style=label.style_label_down, color=color.new(#ff9800, 0),
+             textcolor=color.white, size=size.tiny)
+if not na(pl) and pl < close
+    addLevel(false, pl, xL)
+    if showSwings
+        label.new(xL, pl, "SL " + str.tostring(pl, format.mintick),
+             style=label.style_label_up, color=color.new(#2962ff, 0),
+             textcolor=color.white, size=size.tiny)
+
+// ─────────── Sweep detection ───────────
+// Sweep = wick through a level + close back inside (liquidity grab)
+bool  bearSweep = false
+bool  bullSweep = false
+float sweepPx   = na
+
+if array.size(bslPrices) > 0
+    for i = 0 to array.size(bslPrices) - 1
+        float p = array.get(bslPrices, i)
+        if high > p and close < p and na(sweepPx)
+            bearSweep := true
+            sweepPx   := high
+            dropLevel(bslLines, bslPrices, i)
+            break
+
+if array.size(sslPrices) > 0
+    for i = 0 to array.size(sslPrices) - 1
+        float p = array.get(sslPrices, i)
+        if low < p and close > p and na(sweepPx)
+            bullSweep := true
+            sweepPx   := low
+            dropLevel(sslLines, sslPrices, i)
+            break
+
+// Remove levels consumed by a clean break (close through, no sweep)
+int j = array.size(bslPrices) - 1
+while j >= 0
+    if close > array.get(bslPrices, j)
+        dropLevel(bslLines, bslPrices, j)
+    j -= 1
+j := array.size(sslPrices) - 1
+while j >= 0
+    if close < array.get(sslPrices, j)
+        dropLevel(sslLines, sslPrices, j)
+    j -= 1
+
+// ─────────── Nearest-level helpers ───────────
+nearestBelow(float[] prices, float ref) =>
+    float best = na
+    int n = array.size(prices)
+    int k = 0
+    while k < n
+        float p = array.get(prices, k)
+        if p < ref and (na(best) or p > best)
+            best := p
+        k += 1
+    best
+
+nearestAbove(float[] prices, float ref) =>
+    float best = na
+    int n = array.size(prices)
+    int k = 0
+    while k < n
+        float p = array.get(prices, k)
+        if p > ref and (na(best) or p < best)
+            best := p
+        k += 1
+    best
+
+// ─────────── Entry / SL / TP (zone-filtered) ───────────
+bool longOK  = not filterZone or not zKnown or nearBuyZone(close)
+bool shortOK = not filterZone or not zKnown or nearSellZone(close)
+
+var float  ePrice = na
+var float  eSL    = na
+var float  eTP    = na
+var string eDir   = na
+var line   slL    = na
+var line   tpL    = na
+
+if bearSweep and showSig and shortOK
+    ePrice := close
+    eSL    := sweepPx
+    eTP    := nearestBelow(sslPrices, close)
+    eDir   := "S"
+    label.new(bar_index, high,
+         "SHORT\nSL " + str.tostring(sweepPx, format.mintick) +
+         (na(eTP) ? "" : "\nTP " + str.tostring(eTP, format.mintick)),
+         style=label.style_label_down, color=color.new(color.red, 0),
+         textcolor=color.white, size=size.small)
+    if showTP
+        if not na(slL)
+            line.delete(slL)
+        if not na(tpL)
+            line.delete(tpL)
+        slL := line.new(bar_index, sweepPx, bar_index + 10, sweepPx, extend=extend.right,
+             color=color.new(color.red, 0), width=2)
+        if not na(eTP)
+            tpL := line.new(bar_index, eTP, bar_index + 10, eTP, extend=extend.right,
+                 color=color.new(color.green, 0), width=2)
+
+if bullSweep and showSig and longOK
+    ePrice := close
+    eSL    := sweepPx
+    eTP    := nearestAbove(bslPrices, close)
+    eDir   := "L"
+    label.new(bar_index, low,
+         "LONG\nSL " + str.tostring(sweepPx, format.mintick) +
+         (na(eTP) ? "" : "\nTP " + str.tostring(eTP, format.mintick)),
+         style=label.style_label_up, color=color.new(color.teal, 0),
+         textcolor=color.white, size=size.small)
+    if showTP
+        if not na(slL)
+            line.delete(slL)
+        if not na(tpL)
+            line.delete(tpL)
+        slL := line.new(bar_index, sweepPx, bar_index + 10, sweepPx, extend=extend.right,
+             color=color.new(color.red, 0), width=2)
+        if not na(eTP)
+            tpL := line.new(bar_index, eTP, bar_index + 10, eTP, extend=extend.right,
+                 color=color.new(color.green, 0), width=2)
+
+// Extend active SL/TP lines
+if not na(slL)
+    line.set_x2(slL, bar_index + 10)
+if not na(tpL)
+    line.set_x2(tpL, bar_index + 10)
+
+// TP / SL hit → mark exit, reset
+if eDir == "S"
+    if not na(eTP) and low <= eTP
+        label.new(bar_index, low, "TP HIT", style=label.style_label_up,
+             color=color.new(color.green, 0), textcolor=color.white, size=size.small)
+        eDir := na
+    else if high >= eSL
+        label.new(bar_index, high, "SL HIT", style=label.style_label_down,
+             color=color.new(color.gray, 0), textcolor=color.white, size=size.small)
+        eDir := na
+else if eDir == "L"
+    if not na(eTP) and high >= eTP
+        label.new(bar_index, high, "TP HIT", style=label.style_label_down,
+             color=color.new(color.green, 0), textcolor=color.white, size=size.small)
+        eDir := na
+    else if low <= eSL
+        label.new(bar_index, low, "SL HIT", style=label.style_label_up,
+             color=color.new(color.gray, 0), textcolor=color.white, size=size.small)
+        eDir := na
+
+// ─────────── Dashboard ───────────
+var table dash = table.new(position.top_right, 2, 4, border_width=1,
+     border_color=color.new(color.gray, 70))
+
+if showDash and barstate.islast
+    float bsl = nearestAbove(bslPrices, close)
+    float ssl = nearestBelow(sslPrices, close)
+    table.cell(dash, 0, 0, "BUY-SIDE LIQ",
+         text_color=color.white, bgcolor=color.new(color.red, 25))
+    table.cell(dash, 1, 0,
+         na(bsl) ? "—" : str.tostring(bsl, format.mintick) +
+         " (" + str.tostring((bsl - close) / close * 100, "#.##") + "%)",
+         text_color=color.white, bgcolor=color.new(color.red, 25))
+    table.cell(dash, 0, 1, "SELL-SIDE LIQ",
+         text_color=color.white, bgcolor=color.new(color.teal, 25))
+    table.cell(dash, 1, 1,
+         na(ssl) ? "—" : str.tostring(ssl, format.mintick) +
+         " (" + str.tostring((close - ssl) / close * 100, "#.##") + "%)",
+         text_color=color.white, bgcolor=color.new(color.teal, 25))
+    string zstate = not zKnown ? "N/A" : nearBuyZone(close) ? "IN BUY ZONE" : nearSellZone(close) ? "IN SELL ZONE" : "—"
+    table.cell(dash, 0, 2, "ZONE",
+         text_color=color.white, bgcolor=color.new(#ff9800, 25))
+    table.cell(dash, 1, 2, zstate,
+         text_color=color.white, bgcolor=color.new(#ff9800, 25))
+    table.cell(dash, 0, 3, "SWING L/R",
+         text_color=color.white, bgcolor=color.new(color.gray, 25))
+    table.cell(dash, 1, 3, str.tostring(leftBars) + "/" + str.tostring(rightBars),
+         text_color=color.white, bgcolor=color.new(color.gray, 25))
+
+// ─────────── Alerts ───────────
+alertcondition(bearSweep and shortOK, title="Bearish sweep",
+     message="Bearish liquidity sweep on {{ticker}} ({{interval}})")
+alertcondition(bullSweep and longOK, title="Bullish sweep",
+     message="Bullish liquidity sweep on {{ticker}} ({{interval}})")
