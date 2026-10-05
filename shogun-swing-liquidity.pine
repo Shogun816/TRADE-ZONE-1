@@ -352,11 +352,11 @@ earlyDist = input.float(0.5, "Trigger distance (× ATR)", minval=0.1, maxval=3.0
 
 earlyLongRaw  = false
 earlyShortRaw = false
-for i = 0 to math.min(array.size(liqSellPx) - 1, maxSweeps - 1)
-    if array.get(liqSellPx, i) > low and array.get(liqSellPx, i) - low < earlyDist * atr
+for i = 0 to math.min(array.size(sslPrices) - 1, maxLevels - 1)
+    if array.get(sslPrices, i) > low and array.get(sslPrices, i) - low < earlyDist * atr
         earlyLongRaw := true
-for i = 0 to math.min(array.size(liqBuyPx) - 1, maxSweeps - 1)
-    if array.get(liqBuyPx, i) < high and high - array.get(liqBuyPx, i) < earlyDist * atr
+for i = 0 to math.min(array.size(bslPrices) - 1, maxLevels - 1)
+    if array.get(bslPrices, i) < high and high - array.get(bslPrices, i) < earlyDist * atr
         earlyShortRaw := true
 
 earlyLongSig  = earlyOn and earlyLongRaw and not earlyLongRaw[1] and longOK
