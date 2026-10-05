@@ -1,9 +1,10 @@
 //@version=5
 // ═══════════════════════════════════════════════════════════════════
-//  SHOGUN Swing + Liquidity [v4]
+//  SHOGUN Swing + Liquidity [v5]
 //  Swing highs/lows + un-swept liquidity levels + sweep entry/exit signals
 //  + SHOGUN zone overlay (auto-detected per symbol) with in-zone filter
 //  + ATR-spaced labels + TP-hit / SL-hit alerts + zone style control
+//  + New York / London session shading
 //  Usage: paste into TradingView Pine Editor → "Add to chart"
 // ═══════════════════════════════════════════════════════════════════
 indicator("SHOGUN Swing + Liquidity", shorttitle="SHOGUN S+L", overlay=true,
@@ -148,6 +149,18 @@ if useZones and zKnown and zoneStyle == "Edge lines" and barstate.isfirst
     zline(s1h, color.red)
     zline(s2l, color.red)
     zline(s2h, color.red)
+
+// ─────────── Session shading (New York / London, ET) ───────────
+grpT         = "Sessions"
+showSessions = input.bool(true, "Session shading", group=grpT,
+     tooltip="Shades the background during London and New York sessions (intraday timeframes)")
+nyCol        = input.color(color.new(color.blue, 92), "New York 8a–5p ET", group=grpT, inline="sess")
+ldnCol       = input.color(color.new(color.purple, 92), "London 3a–12p ET", group=grpT, inline="sess")
+
+inLondonSess = not na(time(timeframe.period, "0300-1200", "America/New_York"))
+inNYSess     = not na(time(timeframe.period, "0800-1700", "America/New_York"))
+sessBg       = not showSessions ? na : inNYSess ? nyCol : inLondonSess ? ldnCol : na
+bgcolor(sessBg)
 
 // ─────────── Swing detection (confirmed fractals) ───────────
 float atr = nz(ta.atr(14), 0.0)
