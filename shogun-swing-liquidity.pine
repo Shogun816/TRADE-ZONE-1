@@ -326,14 +326,12 @@ if showDash and barstate.islast
     table.cell(dash, 0, 0, "BUY-SIDE LIQ",
          text_color=color.white, bgcolor=color.new(color.red, 25))
     table.cell(dash, 1, 0,
-         na(bsl) ? "—" : str.tostring(bsl, format.mintick) +
-         " (" + str.tostring((bsl - close) / close * 100, "#.##") + "%)",
+         na(bsl) ? "—" : str.tostring(bsl, format.mintick),
          text_color=color.white, bgcolor=color.new(color.red, 25))
     table.cell(dash, 0, 1, "SELL-SIDE LIQ",
          text_color=color.white, bgcolor=color.new(color.teal, 25))
     table.cell(dash, 1, 1,
-         na(ssl) ? "—" : str.tostring(ssl, format.mintick) +
-         " (" + str.tostring((close - ssl) / close * 100, "#.##") + "%)",
+         na(ssl) ? "—" : str.tostring(ssl, format.mintick),
          text_color=color.white, bgcolor=color.new(color.teal, 25))
     string zstate = not zKnown ? "N/A" : nearBuyZone(close) ? "IN BUY ZONE" : nearSellZone(close) ? "IN SELL ZONE" : "—"
     table.cell(dash, 0, 2, "ZONE",
