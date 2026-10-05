@@ -1,8 +1,9 @@
 //@version=5
 // ═══════════════════════════════════════════════════════════════════
-//  SHOGUN Swing + Liquidity [v2]
+//  SHOGUN Swing + Liquidity [v3]
 //  Swing highs/lows + un-swept liquidity levels + sweep entry/exit signals
 //  + SHOGUN zone overlay (auto-detected per symbol) with in-zone filter
+//  + ATR-spaced labels + TP-hit / SL-hit alerts
 //  Usage: paste into TradingView Pine Editor → "Add to chart"
 // ═══════════════════════════════════════════════════════════════════
 indicator("SHOGUN Swing + Liquidity", shorttitle="SHOGUN S+L", overlay=true,
@@ -20,9 +21,11 @@ grpL      = "Liquidity"
 showLiq   = input.bool(true, "Liquidity lines", group=grpL)
 maxLevels = input.int(8, "Levels kept per side", minval=1, maxval=20, group=grpL)
 
-grpX    = "Entry / Exit"
-showSig = input.bool(true, "Sweep entry signals", group=grpX)
-showTP  = input.bool(true, "SL / TP lines", group=grpX)
+grpX        = "Entry / Exit"
+showSig     = input.bool(true, "Sweep entry signals", group=grpX)
+showTP      = input.bool(true, "SL / TP lines", group=grpX)
+labelOffset = input.float(0.5, "Label offset (ATR)", minval=0.0, step=0.1, group=grpX,
+     tooltip="Pushes LONG / SHORT / TP HIT / SL HIT labels away from the candles so price action stays visible")
 
 grpZ       = "SHOGUN Zones"
 useZones   = input.bool(true, "Zone overlay", group=grpZ,
@@ -130,6 +133,7 @@ if useZones and zKnown and barstate.isfirst
          text_size=size.tiny, text_color=color.new(color.red, 20))
 
 // ─────────── Swing detection (confirmed fractals) ───────────
+float atr = nz(ta.atr(14), 0.0)
 ph = ta.pivothigh(high, leftBars, rightBars)
 pl = ta.pivotlow(low, leftBars, rightBars)
 int xH = bar_index - rightBars
@@ -168,13 +172,13 @@ dropLevel(line[] lines, float[] prices, int i) =>
 if not na(ph) and ph > close
     addLevel(true, ph, xH)
     if showSwings
-        label.new(xH, ph, "SH " + str.tostring(ph, format.mintick),
+        label.new(xH, ph + atr * labelOffset, "SH " + str.tostring(ph, format.mintick),
              style=label.style_label_down, color=color.new(#ff9800, 0),
              textcolor=color.white, size=size.tiny)
 if not na(pl) and pl < close
     addLevel(false, pl, xL)
     if showSwings
-        label.new(xL, pl, "SL " + str.tostring(pl, format.mintick),
+        label.new(xL, pl - atr * labelOffset, "SL " + str.tostring(pl, format.mintick),
              style=label.style_label_up, color=color.new(#2962ff, 0),
              textcolor=color.white, size=size.tiny)
 
@@ -253,7 +257,7 @@ if bearSweep and showSig and shortOK
     eSL    := sweepPx
     eTP    := nearestBelow(sslPrices, close)
     eDir   := "S"
-    label.new(bar_index, high,
+    label.new(bar_index, high + atr * labelOffset,
          "SHORT\nSL " + str.tostring(sweepPx, format.mintick) +
          (na(eTP) ? "" : "\nTP " + str.tostring(eTP, format.mintick)),
          style=label.style_label_down, color=color.new(color.red, 0),
@@ -274,7 +278,7 @@ if bullSweep and showSig and longOK
     eSL    := sweepPx
     eTP    := nearestAbove(bslPrices, close)
     eDir   := "L"
-    label.new(bar_index, low,
+    label.new(bar_index, low - atr * labelOffset,
          "LONG\nSL " + str.tostring(sweepPx, format.mintick) +
          (na(eTP) ? "" : "\nTP " + str.tostring(eTP, format.mintick)),
          style=label.style_label_up, color=color.new(color.teal, 0),
@@ -296,23 +300,30 @@ if not na(slL)
 if not na(tpL)
     line.set_x2(tpL, bar_index + 10)
 
-// TP / SL hit → mark exit, reset
+// TP / SL hit → mark exit, reset (flags feed the alerts below)
+bool tpHit = false
+bool slHit = false
+
 if eDir == "S"
     if not na(eTP) and low <= eTP
-        label.new(bar_index, low, "TP HIT", style=label.style_label_up,
+        tpHit := true
+        label.new(bar_index, low - atr * labelOffset, "TP HIT", style=label.style_label_up,
              color=color.new(color.green, 0), textcolor=color.white, size=size.small)
         eDir := na
     else if high >= eSL
-        label.new(bar_index, high, "SL HIT", style=label.style_label_down,
+        slHit := true
+        label.new(bar_index, high + atr * labelOffset, "SL HIT", style=label.style_label_down,
              color=color.new(color.gray, 0), textcolor=color.white, size=size.small)
         eDir := na
 else if eDir == "L"
     if not na(eTP) and high >= eTP
-        label.new(bar_index, high, "TP HIT", style=label.style_label_down,
+        tpHit := true
+        label.new(bar_index, high + atr * labelOffset, "TP HIT", style=label.style_label_down,
              color=color.new(color.green, 0), textcolor=color.white, size=size.small)
         eDir := na
     else if low <= eSL
-        label.new(bar_index, low, "SL HIT", style=label.style_label_up,
+        slHit := true
+        label.new(bar_index, low - atr * labelOffset, "SL HIT", style=label.style_label_up,
              color=color.new(color.gray, 0), textcolor=color.white, size=size.small)
         eDir := na
 
@@ -348,3 +359,7 @@ alertcondition(bearSweep and shortOK, title="Bearish sweep",
      message="Bearish liquidity sweep on {{ticker}} ({{interval}})")
 alertcondition(bullSweep and longOK, title="Bullish sweep",
      message="Bullish liquidity sweep on {{ticker}} ({{interval}})")
+alertcondition(tpHit, title="TP hit",
+     message="Take profit hit on {{ticker}} ({{interval}})")
+alertcondition(slHit, title="SL hit",
+     message="Stop loss hit on {{ticker}} ({{interval}})")
