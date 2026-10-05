@@ -1,10 +1,11 @@
 //@version=5
 // ═══════════════════════════════════════════════════════════════════
-//  SHOGUN Swing + Liquidity [v6]
+//  SHOGUN Swing + Liquidity [v7]
 //  Swing highs/lows + un-swept liquidity levels + sweep entry/exit signals
 //  + SHOGUN zone overlay (auto-detected per symbol) with in-zone filter
 //  + ATR-spaced labels + TP-hit / SL-hit alerts + zone style control
 //  + New York / London session shading + estimated volume delta
+//  + early pre-sweep signals (heads-up before the confirmed signal)
 //  Usage: paste into TradingView Pine Editor → "Add to chart"
 // ═══════════════════════════════════════════════════════════════════
 indicator("SHOGUN Swing + Liquidity", shorttitle="SHOGUN S+L", overlay=true,
@@ -342,6 +343,36 @@ if bullSweep and showSig and longOK
         if not na(eTP)
             tpL := line.new(bar_index, eTP, bar_index + 10, eTP, extend=extend.right,
                  color=color.new(color.green, 0), width=2)
+
+// ─────────── Early (pre-sweep) signals ───────────
+grpE      = "Early signals"
+earlyOn   = input.bool(true, "Early signals", group=grpE,
+     tooltip="Heads-up marker when price closes in on un-swept liquidity, before the confirmed sweep signal fires")
+earlyDist = input.float(0.5, "Trigger distance (× ATR)", minval=0.1, maxval=3.0, step=0.1, group=grpE)
+
+earlyLongRaw  = false
+earlyShortRaw = false
+for i = 0 to math.min(array.size(liqSellPx) - 1, maxSweeps - 1)
+    if array.get(liqSellPx, i) > low and array.get(liqSellPx, i) - low < earlyDist * atr
+        earlyLongRaw := true
+for i = 0 to math.min(array.size(liqBuyPx) - 1, maxSweeps - 1)
+    if array.get(liqBuyPx, i) < high and high - array.get(liqBuyPx, i) < earlyDist * atr
+        earlyShortRaw := true
+
+earlyLongSig  = earlyOn and earlyLongRaw and not earlyLongRaw[1] and longOK
+earlyShortSig = earlyOn and earlyShortRaw and not earlyShortRaw[1] and shortOK
+
+if earlyLongSig
+    label.new(bar_index, low - atr * labelOffset, "EARLY LONG",
+         style=label.style_label_up, color=color.new(color.orange, 0),
+         textcolor=color.white, size=size.tiny)
+if earlyShortSig
+    label.new(bar_index, high + atr * labelOffset, "EARLY SHORT",
+         style=label.style_label_down, color=color.new(color.orange, 0),
+         textcolor=color.white, size=size.tiny)
+
+alertcondition(earlyLongSig, "Early long", "SHOGUN: price approaching sell-side liquidity (early long)")
+alertcondition(earlyShortSig, "Early short", "SHOGUN: price approaching buy-side liquidity (early short)")
 
 // Extend active SL/TP lines
 if not na(slL)
